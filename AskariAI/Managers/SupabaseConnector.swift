@@ -79,4 +79,14 @@ final class SupabaseConnector: PowerSyncBackendConnectorProtocol, @unchecked Sen
     func signOut() async throws {
         try await client.auth.signOut()
     }
+
+    func signUp(email: String, password: String, firstName: String, lastName: String) async throws {
+        // Pass name as user metadata — a SECURITY DEFINER trigger on auth.users
+        // will create the staff row, bypassing RLS.
+        try await client.auth.signUp(
+            email: email,
+            password: password,
+            data: ["first_name": .string(firstName), "last_name": .string(lastName)]
+        )
+    }
 }

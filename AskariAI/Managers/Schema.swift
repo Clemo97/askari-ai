@@ -2,33 +2,48 @@ import PowerSync
 
 // MARK: - Sync Priorities
 enum SyncPriority {
-    static let critical   = 0  // Park boundaries — first
+    static let critical   = 0  // Park info — first
     static let essential  = 1  // Park blocks — second
     static let important  = 2  // Staff, missions — third
     static let background = 3  // Incidents, tracks — last
 }
 
 // MARK: - Tables
-// Columns reflect the ACTUAL Supabase schema (e-parcs + Askari AI additions).
+// Columns reflect the ACTUAL Supabase e-parcs schema (verified against DBML).
 // All columns are text/real/integer — SQLite types. IDs are lowercase UUID strings.
+
+let parks = Table(
+    name: "parks",
+    columns: [
+        .text("name"),
+        .text("country"),
+        .text("region"),
+        .text("timezone"),
+        .text("created_at"),
+        .text("updated_at"),
+    ]
+)
 
 let staff = Table(
     name: "staff",
     columns: [
+        .text("user_id"),           // Supabase Auth UUID
+        .text("park_id"),
         .text("email"),
-        .text("staff_number"),
         .text("first_name"),
         .text("last_name"),
         .text("rank"),              // "ranger"|"supervisor"|"park_head"|"admin"|"parks_authority"
-        .text("user_id"),           // Supabase Auth UUID
-        .text("photo_url"),
+        .text("avatar_url"),
+        .integer("is_active"),
         .text("created_at"),
+        .text("updated_at"),
     ]
 )
 
 let missions = Table(
     name: "missions",
     columns: [
+        .text("park_id"),
         .text("name"),
         .text("objectives"),
         .text("start_date"),
@@ -38,21 +53,19 @@ let missions = Table(
         .text("mission_state"),         // "not_started"|"active"|"paused"|"completed"
         .text("staff_ids"),             // JSON array of UUID strings
         .text("leader_id"),
-        .text("selected_block_ids"),    // JSON array of UUID strings (added by Askari AI)
-        .text("user_id"),               // creator's auth UUID
+        .text("selected_block_ids"),    // JSON array of UUID strings
+        .text("created_by"),
         .text("created_at"),
         .text("updated_at"),
-        .text("patrol_actions"),
-        .text("route_points"),          // JSONB
-        .text("instruction_video_url"),
-        .real("total_active_time"),
-        .text("last_state_change"),
     ]
 )
 
 let map_features = Table(
     name: "map_features",
     columns: [
+        .text("park_id"),
+        .text("mission_id"),
+        .text("spot_type_id"),
         .text("name"),
         .text("description"),
         .text("geometry"),              // GeoJSON {type, coordinates}
@@ -60,45 +73,37 @@ let map_features = Table(
         .text("captured_by_staff_id"),
         .text("created_at"),
         .text("updated_at"),
-        .text("media_url"),
-        .text("mission_id"),
-        .text("spot_type_id"),          // FK to spot_types (added by Askari AI)
-        .integer("is_resolved"),        // 0 | 1 (added by Askari AI)
+        .text("media_url"),             // JSONB array stored as text
+        .integer("is_resolved"),
         .text("resolved_at"),
         .text("resolved_by"),
         .text("severity"),              // "low"|"medium"|"high"|"critical"
-        .real("decay_rate"),
-        .real("threshold"),
-        .real("buffer_distance"),
-        .text("last_patrolled"),
-        .text("local_media_identifiers"), // stored as JSON text
     ]
 )
 
 let park_blocks = Table(
     name: "park_blocks",
     columns: [
+        .text("park_id"),
         .text("block_name"),
-        .text("coordinates"),           // JSON [[lon,lat],...] stored as text
+        .text("coordinates"),           // JSONB stored as text
         .real("threshold"),
         .real("visibility"),
         .real("rate_of_decay"),
         .text("last_patrolled"),
-        .text("park_id"),               // FK to park_boundaries
         .text("created_at"),
         .text("updated_at"),
     ]
 )
 
-/// park_boundaries is the source of truth for park identity (contains park_name + country)
+/// park_boundaries — boundary polygons for each park (name/country comes from parks table)
 let park_boundaries = Table(
     name: "park_boundaries",
     columns: [
-        .text("park_name"),
-        .text("country"),
-        .text("coordinates"),           // GeoJSON stored as JSONB → text in SQLite
+        .text("park_id"),
+        .text("name"),
+        .text("geometry"),              // GeoJSON stored as JSONB → text in SQLite
         .text("created_at"),
-        .text("updated_at"),
     ]
 )
 
@@ -116,14 +121,17 @@ let spot_types = Table(
     ]
 )
 
-/// green_track is the existing GPS track table (named differently from plan)
-let green_track = Table(
-    name: "green_track",
+/// mission_track — GPS track per mission/staff (called mission_track in the actual DB)
+let mission_track = Table(
+    name: "mission_track",
     columns: [
         .text("mission_id"),
-        .text("geometry"),              // GeoJSON track
+        .text("staff_id"),
+        .text("path_geometry"),
+        .text("coverage_geometry"),
         .real("distance_traveled_km"),
         .text("created_at"),
+        .text("updated_at"),
     ]
 )
 
@@ -133,7 +141,8 @@ let mission_scores = Table(
         .text("mission_id"),
         .real("distance_traveled_km"),
         .real("buffer_points"),
-        .integer("mission_completed"),  // 0 | 1
+        .real("incident_points"),
+        .integer("mission_completed"),
         .text("completed_at"),
         .text("created_at"),
         .text("updated_at"),
@@ -143,8 +152,8 @@ let mission_scores = Table(
 let mission_role_types = Table(
     name: "mission_role_types",
     columns: [
-        .text("role_name"),
-        .text("user_id"),
+        .text("name"),
+        .text("description"),
     ]
 )
 
@@ -153,22 +162,15 @@ let staff_mission = Table(
     columns: [
         .text("staff_id"),
         .text("mission_id"),
-        .text("staff_mission_role"),    // role UUID
-        .text("user_id"),
-    ]
-)
-
-let map_features_missions = Table(
-    name: "map_features_missions",
-    columns: [
-        .text("map_feature_id"),
-        .text("mission_id"),
+        .text("role_type_id"),
+        .text("assigned_at"),
     ]
 )
 
 let terrains = Table(
     name: "terrains",
     columns: [
+        .text("park_id"),
         .text("name"),
         .text("geometry"),
         .text("terrain_type"),
@@ -179,14 +181,10 @@ let terrains = Table(
 let filter_presets = Table(
     name: "filter_presets",
     columns: [
+        .text("owner_id"),
         .text("name"),
-        .text("description"),
-        .text("spot_types"),            // JSON array
-        .integer("is_system_preset"),
-        .text("created_by"),
+        .text("filters"),               // JSONB
         .text("created_at"),
-        .text("updated_at"),
-        .integer("days_back"),
     ]
 )
 
@@ -194,17 +192,17 @@ let filter_presets = Table(
 
 let AppSchema = Schema(
     tables: [
+        parks,
         staff,
         missions,
         map_features,
         park_blocks,
         park_boundaries,
         spot_types,
-        green_track,
+        mission_track,
         mission_scores,
         mission_role_types,
         staff_mission,
-        map_features_missions,
         terrains,
         filter_presets,
         createAttachmentTable(name: "attachments"),

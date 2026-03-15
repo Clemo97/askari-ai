@@ -58,7 +58,7 @@ extension StaffMember {
         self.rank = Rank(rawValue: (try? cursor.getString(name: "rank")) ?? "ranger") ?? .ranger
         self.parkId = (try? cursor.getStringOptional(name: "park_id")).flatMap { $0 }.flatMap(UUID.init)
         self.userId = (try? cursor.getStringOptional(name: "user_id")).flatMap { $0 }.flatMap(UUID.init)
-        self.avatarURL = (try? cursor.getStringOptional(name: "photo_url")) ?? nil
+        self.avatarURL = (try? cursor.getStringOptional(name: "avatar_url")) ?? nil
         self.createdAt = createdAt
         self.isActive = ((try? cursor.getIntOptional(name: "is_active")) ?? 1) != 0
     }
@@ -80,7 +80,7 @@ extension StaffMember {
         self.rank = Rank(rawValue: row["rank"] as? String ?? "ranger") ?? .ranger
         self.parkId = (row["park_id"] as? String).flatMap(UUID.init)
         self.userId = (row["user_id"] as? String).flatMap(UUID.init)
-        self.avatarURL = row["photo_url"] as? String
+        self.avatarURL = row["avatar_url"] as? String
         self.createdAt = createdAt
         self.isActive = (row["is_active"] as? String) != "0"
     }
