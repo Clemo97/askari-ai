@@ -80,6 +80,61 @@ final class SupabaseConnector: PowerSyncBackendConnectorProtocol, @unchecked Sen
         try await client.auth.signOut()
     }
 
+    /// Fetch the current user's staff profile directly from Supabase REST.
+    /// Use this after sign-in/sign-up before PowerSync has had a chance to sync.
+    func fetchCurrentStaff() async throws -> StaffMember? {
+        guard let user = await currentUser else { return nil }
+
+        // Explicit CodingKeys so we never rely on decoder key strategy.
+        struct StaffRow: Decodable {
+            let id: String
+            let email: String
+            let firstName: String
+            let lastName: String
+            let rank: String?
+            let parkId: String?
+            let userId: String?
+            let avatarUrl: String?
+            let createdAt: String?
+            let isActive: Bool?
+
+            enum CodingKeys: String, CodingKey {
+                case id, email, rank
+                case firstName  = "first_name"
+                case lastName   = "last_name"
+                case parkId     = "park_id"
+                case userId     = "user_id"
+                case avatarUrl  = "avatar_url"
+                case createdAt  = "created_at"
+                case isActive   = "is_active"
+            }
+        }
+
+        let rows: [StaffRow] = try await client.from("staff")
+            .select()
+            .eq("user_id", value: user.id.uuidString)
+            .limit(1)
+            .execute()
+            .value
+
+        guard let row = rows.first, let id = UUID(uuidString: row.id) else { return nil }
+
+        let createdAt = row.createdAt.flatMap(SystemManager.parseDate) ?? Date()
+
+        return StaffMember(
+            id: id,
+            email: row.email,
+            firstName: row.firstName,
+            lastName: row.lastName,
+            rank: StaffMember.Rank(rawValue: row.rank ?? "ranger") ?? .ranger,
+            parkId: row.parkId.flatMap(UUID.init),
+            userId: row.userId.flatMap(UUID.init),
+            avatarURL: row.avatarUrl,
+            createdAt: createdAt,
+            isActive: row.isActive ?? true
+        )
+    }
+
     func signUp(email: String, password: String, firstName: String, lastName: String) async throws {
         // Pass name as user metadata — a SECURITY DEFINER trigger on auth.users
         // will create the staff row, bypassing RLS.

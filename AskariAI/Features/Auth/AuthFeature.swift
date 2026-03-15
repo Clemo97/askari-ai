@@ -47,10 +47,11 @@ struct AuthFeature {
                 return .run { send in
                     do {
                         try await systemManager.connector.signIn(email: email, password: password)
-                        if let staff = try await systemManager.getCurrentUser() {
+                        // Query Supabase REST directly — local PowerSync DB is empty until sync
+                        if let staff = try await systemManager.connector.fetchCurrentStaff() {
                             await send(.signInSucceeded(staff))
                         } else {
-                            await send(.setError("Account not linked to a ranger profile. Contact your park administrator."))
+                            await send(.setError("No ranger profile found. Please sign up first or contact your administrator."))
                         }
                     } catch {
                         await send(.setError(error.localizedDescription))
@@ -72,13 +73,14 @@ struct AuthFeature {
                             firstName: firstName,
                             lastName: lastName
                         )
-                        // After sign-up, sign in automatically
+                        // Sign in automatically after account creation
                         try await systemManager.connector.signIn(email: email, password: password)
-                        if let staff = try await systemManager.getCurrentUser() {
+                        // Give the DB trigger a moment to create the staff row
+                        try await Task.sleep(for: .seconds(1))
+                        if let staff = try await systemManager.connector.fetchCurrentStaff() {
                             await send(.signInSucceeded(staff))
                         } else {
-                            // Profile created but staff row not yet visible — connect anyway
-                            await send(.setError("Account created! A park administrator needs to link your profile before you can patrol. You can sign in once linked."))
+                            await send(.setError("Account created! Sign in to continue."))
                         }
                     } catch {
                         await send(.setError(error.localizedDescription))
