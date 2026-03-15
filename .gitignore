@@ -1,0 +1,32 @@
+# Xcode build artifacts
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcworkspace/xcshareddata/
+build/
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Secrets / credentials — NEVER commit
+AskariAI/Managers/_Secrets.swift
+
+# SPM
+.build/
+*.resolved
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# VS Code
+.vscode/
+
+# Environment
+.env
+*.env.local
+
+# Cactus model cache (large binary files)
+*.gguf
+*.mlmodelc

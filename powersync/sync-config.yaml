@@ -1,0 +1,248 @@
+# powersync/sync-config.yaml
+# Askari AI — Ranger Intelligence Copilot
+# PowerSync Sync Streams — edition 3
+# Instance: https://69b5b2687c4f8b306a1b8255.powersync.journeyapps.com
+
+config:
+  edition: 3
+
+streams:
+  # ── Priority 0 ─ Park identity ─────────────────────────────────────────────
+  # waitForFirstSync(priority: 0) in SystemManager.connect() blocks until this
+  # stream has fully synced.
+  park_boundaries:
+    auto_subscribe: true
+    priority: 0
+    query: SELECT * FROM park_boundaries
+
+  # ── Priority 1 ─ Patrol zones ─────────────────────────────────────────────
+  park_blocks:
+    auto_subscribe: true
+    priority: 1
+    query: SELECT * FROM park_blocks
+
+  # ── Priority 2 ─ Operational data ─────────────────────────────────────────
+  reference_data:
+    auto_subscribe: true
+    priority: 2
+    queries:
+      - SELECT * FROM spot_types
+      - SELECT * FROM terrains
+      - SELECT * FROM filter_presets
+      - SELECT * FROM mission_role_types
+
+  my_staff:
+    auto_subscribe: true
+    priority: 2
+    query: SELECT * FROM staff WHERE user_id = auth.user_id()
+
+  active_missions:
+    auto_subscribe: true
+    priority: 2
+    queries:
+      - SELECT * FROM missions WHERE status IN ('current', 'future')
+      - SELECT * FROM staff_mission WHERE mission_id IN (
+            SELECT id FROM missions WHERE status IN ('current', 'future')
+          )
+      - SELECT * FROM staff WHERE id IN (
+            SELECT staff_id FROM staff_mission WHERE mission_id IN (
+              SELECT id FROM missions WHERE status IN ('current', 'future')
+            )
+          )
+
+  # ── Priority 3 ─ Incidents, GPS tracks, scores ────────────────────────────
+  incidents:
+    auto_subscribe: true
+    priority: 3
+    queries:
+      - SELECT * FROM map_features WHERE mission_id IN (
+            SELECT id FROM missions WHERE status IN ('current', 'future')
+          )
+      - SELECT * FROM map_features_missions WHERE mission_id IN (
+            SELECT id FROM missions WHERE status IN ('current', 'future')
+          )
+
+  gps_and_scores:
+    auto_subscribe: true
+    priority: 3
+    queries:
+      - SELECT * FROM green_track WHERE mission_id IN (
+            SELECT id FROM missions WHERE status IN ('current', 'future')
+          )
+      - SELECT * FROM mission_scores WHERE mission_id IN (
+            SELECT id FROM missions WHERE status IN ('current', 'future')
+          )
+
+  edition: 3
+
+streams:
+
+  # ----------------------------------------------------------
+  # PRIORITY 0 — Park Boundaries (critical, load first)
+  # Note: existing schema uses park_name/country inline (no parks table)
+  # ----------------------------------------------------------
+  park_boundaries:
+    priority: 0
+    auto_subscribe: true
+    query: SELECT * FROM park_boundaries
+
+  # ----------------------------------------------------------
+  # PRIORITY 1 — Park Blocks (essential)
+  # Note: park_blocks has no park_id — sync all blocks
+  # ----------------------------------------------------------
+  park_blocks:
+    priority: 1
+    auto_subscribe: true
+    query: SELECT * FROM park_blocks
+
+  # ----------------------------------------------------------
+  # PRIORITY 2 — Staff, Spot Types, Missions (important)
+  # ----------------------------------------------------------
+  spot_types:
+    priority: 2
+    auto_subscribe: true
+    query: SELECT * FROM spot_types WHERE is_active = true
+
+  staff_members:
+    priority: 2
+    auto_subscribe: true
+    # All staff share the same park in this deployment
+    query: SELECT * FROM staff WHERE user_id IS NOT NULL
+
+  missions:
+    priority: 2
+    auto_subscribe: true
+    with:
+      my_staff_id: SELECT id FROM staff WHERE user_id = auth.user_id()
+      my_rank:     SELECT rank FROM staff WHERE user_id = auth.user_id()
+    queries:
+      # Rangers/supervisors — only their assigned missions
+      - |
+        SELECT m.*
+        FROM missions m, my_staff_id s, my_rank r
+        WHERE r.rank IN ('ranger', 'supervisor')
+          AND m.staff_ids::jsonb @> to_jsonb(s.id::TEXT)
+      # Park heads, admins, parks authority — all missions
+      - |
+        SELECT m.*
+        FROM missions m, my_rank r
+        WHERE r.rank IN ('park_head', 'admin', 'parks_authority')
+
+  mission_role_types:
+    priority: 2
+    auto_subscribe: true
+    query: SELECT * FROM mission_role_types
+
+  staff_mission:
+    priority: 2
+    auto_subscribe: true
+    with:
+      my_staff_id: SELECT id FROM staff WHERE user_id = auth.user_id()
+      my_rank:     SELECT rank FROM staff WHERE user_id = auth.user_id()
+    queries:
+      - |
+        SELECT sm.*
+        FROM staff_mission sm, my_staff_id s
+        WHERE sm.staff_id = s.id
+      - |
+        SELECT sm.*
+        FROM staff_mission sm, my_rank r
+        WHERE r.rank IN ('park_head', 'admin')
+
+  # ----------------------------------------------------------
+  # PRIORITY 3 — Map Features, Tracks, Scores (background)
+  # ----------------------------------------------------------
+  map_features:
+    priority: 3
+    auto_subscribe: true
+    with:
+      my_staff_id: SELECT id FROM staff WHERE user_id = auth.user_id()
+      my_rank:     SELECT rank FROM staff WHERE user_id = auth.user_id()
+    queries:
+      # Rangers — incidents from their assigned missions only
+      - |
+        SELECT mf.*
+        FROM map_features mf
+        JOIN missions m ON m.id = mf.mission_id, my_staff_id s, my_rank r
+        WHERE r.rank IN ('ranger', 'supervisor')
+          AND m.staff_ids::jsonb @> to_jsonb(s.id::TEXT)
+      # Park heads and admins — all incidents
+      - |
+        SELECT mf.*
+        FROM map_features mf, my_rank r
+        WHERE r.rank IN ('park_head', 'admin', 'parks_authority')
+
+  map_features_missions:
+    priority: 3
+    auto_subscribe: true
+    with:
+      my_staff_id: SELECT id FROM staff WHERE user_id = auth.user_id()
+      my_rank:     SELECT rank FROM staff WHERE user_id = auth.user_id()
+    queries:
+      - |
+        SELECT mfm.*
+        FROM map_features_missions mfm
+        JOIN missions m ON m.id = mfm.mission_id, my_staff_id s, my_rank r
+        WHERE r.rank IN ('ranger', 'supervisor')
+          AND m.staff_ids::jsonb @> to_jsonb(s.id::TEXT)
+      - |
+        SELECT mfm.*
+        FROM map_features_missions mfm, my_rank r
+        WHERE r.rank IN ('park_head', 'admin', 'parks_authority')
+
+  # green_track is the existing GPS track table
+  green_track:
+    priority: 3
+    auto_subscribe: true
+    with:
+      my_staff_id: SELECT id FROM staff WHERE user_id = auth.user_id()
+      my_rank:     SELECT rank FROM staff WHERE user_id = auth.user_id()
+    queries:
+      - |
+        SELECT gt.*
+        FROM green_track gt
+        JOIN missions m ON m.id = gt.mission_id, my_staff_id s, my_rank r
+        WHERE r.rank IN ('ranger', 'supervisor')
+          AND m.staff_ids::jsonb @> to_jsonb(s.id::TEXT)
+      - |
+        SELECT gt.*
+        FROM green_track gt, my_rank r
+        WHERE r.rank IN ('park_head', 'admin')
+
+  mission_scores:
+    priority: 3
+    auto_subscribe: true
+    with:
+      my_staff_id: SELECT id FROM staff WHERE user_id = auth.user_id()
+      my_rank:     SELECT rank FROM staff WHERE user_id = auth.user_id()
+    queries:
+      - |
+        SELECT ms.*
+        FROM mission_scores ms
+        JOIN missions m ON m.id = ms.mission_id, my_staff_id s, my_rank r
+        WHERE r.rank IN ('ranger', 'supervisor')
+          AND m.staff_ids::jsonb @> to_jsonb(s.id::TEXT)
+      - |
+        SELECT ms.*
+        FROM mission_scores ms, my_rank r
+        WHERE r.rank IN ('park_head', 'admin')
+
+  terrains:
+    priority: 3
+    auto_subscribe: true
+    query: SELECT * FROM terrains
+
+  filter_presets:
+    priority: 3
+    auto_subscribe: true
+    with:
+      my_staff_id: SELECT id FROM staff WHERE user_id = auth.user_id()
+    query: |
+      SELECT fp.*
+      FROM filter_presets fp, my_staff_id s
+      WHERE fp.created_by = s.id OR fp.is_system_preset = true
+
+  attachments:
+    priority: 3
+    auto_subscribe: true
+    query: SELECT * FROM attachments
