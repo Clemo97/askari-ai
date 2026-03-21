@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		08CC211002388A7D75F8F711 /* AskariAIApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6814058CDFDE809198B36CFA /* AskariAIApp.swift */; };
+		159E82C576DD635AC1FF3386 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 65B239A6E81736B32914E1F3 /* Supabase */; };
 		2230181AB19C1906AB61907F /* SystemManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E360C7261A5561E794BCC41 /* SystemManager.swift */; };
 		25531ABFFEBCEF69074BCE1F /* SpotType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 081CA72D1FB8F12267DA287B /* SpotType.swift */; };
 		348FC686B90F57666BA30D25 /* Staff.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F6A310465EF61A9CD9DDB16 /* Staff.swift */; };
@@ -18,21 +19,18 @@
 		4DE109B32A70F9E404181F05 /* Mission.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEDAC0B7C1EC02C93FBADAC7 /* Mission.swift */; };
 		528A2212E667578465143707 /* RangerCopilotFeature.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2A395B3052CA220CC95F7DD /* RangerCopilotFeature.swift */; };
 		528F2F20ACC4D86EA871803B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 96456BD7E32739FA5E0A4D56 /* Assets.xcassets */; };
+		5B7556454DEFABA19E70FF94 /* LogIncidentFeature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43C7A2ADE90E156BE9CC4185 /* LogIncidentFeature.swift */; };
 		5F86567B90B8BD6728CA45F3 /* SupabaseConnector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A51DB6B53A3E0E0E2316D09E /* SupabaseConnector.swift */; };
-		60B536412F66894F00B65D12 /* PowerSync in Frameworks */ = {isa = PBXBuildFile; productRef = 60B536402F66894F00B65D12 /* PowerSync */; };
-		60CD89062F65F6B60086957A /* Auth in Frameworks */ = {isa = PBXBuildFile; productRef = 60CD89052F65F6B60086957A /* Auth */; };
-		60CD89082F65F6B60086957A /* Functions in Frameworks */ = {isa = PBXBuildFile; productRef = 60CD89072F65F6B60086957A /* Functions */; };
-		60CD890A2F65F6B60086957A /* PostgREST in Frameworks */ = {isa = PBXBuildFile; productRef = 60CD89092F65F6B60086957A /* PostgREST */; };
-		60CD890C2F65F6B60086957A /* Realtime in Frameworks */ = {isa = PBXBuildFile; productRef = 60CD890B2F65F6B60086957A /* Realtime */; };
-		60CD890E2F65F6B60086957A /* Storage in Frameworks */ = {isa = PBXBuildFile; productRef = 60CD890D2F65F6B60086957A /* Storage */; };
-		60CD89102F65F6B60086957A /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 60CD890F2F65F6B60086957A /* Supabase */; };
 		696140F631C283BE9132D1F3 /* MainFeature.swift in Sources */ = {isa = PBXBuildFile; fileRef = D958ACA45A832A6301DC4DDD /* MainFeature.swift */; };
 		796A8DC4352F09AED2A1D266 /* AIManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33DFE1F23DB19D336354C068 /* AIManager.swift */; };
 		862822517A4C7863C71DA465 /* _Secrets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FA0EEC003026D19AD6AA559 /* _Secrets.swift */; };
+		AC88A8F1960CC858311B14FD /* PowerSync in Frameworks */ = {isa = PBXBuildFile; productRef = 3A0CFA36E88EA00133150E3A /* PowerSync */; };
 		AEDC492CC01A3889D03CFA9D /* ParkBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF4E1FBD7FDC0E87ABE499C1 /* ParkBlock.swift */; };
 		B8785D2BFD276F7562F1ECE0 /* ActiveMissionFeature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E1A7EB4CD9062E3318CD4D9 /* ActiveMissionFeature.swift */; };
 		B9B7BB2823599931B093CF45 /* MissionsFeature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FFC02D3757E31A2118833F0 /* MissionsFeature.swift */; };
+		BE90734F35AC7A9C395BB993 /* ParkBoundary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FF6825CB4611A063296BE39 /* ParkBoundary.swift */; };
 		CBF5BB4669BF2E4D204549BF /* Incident.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4665BDA1910FCA134F24A656 /* Incident.swift */; };
+		CD1FCB25502A196F585C9B7F /* RangerMapFeature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 794FD9C8EBB1AFE803D5CCC7 /* RangerMapFeature.swift */; };
 		D8EA6174FE6C94D0753634A4 /* Schema.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E21FD0771F895C19ABA113E /* Schema.swift */; };
 		DA588A46BCF77D27C206E61E /* AuthFeature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CD5BCB11B3FAC25FCBB0BF6 /* AuthFeature.swift */; };
 		E17AB331523583833DB20BFA /* Cactus in Frameworks */ = {isa = PBXBuildFile; productRef = 43D3DDC471A88D640846B53C /* Cactus */; };
@@ -46,15 +44,18 @@
 		33DFE1F23DB19D336354C068 /* AIManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIManager.swift; sourceTree = "<group>"; };
 		389BB2F06E9DF87C9390EC2F /* CopilotChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CopilotChatView.swift; sourceTree = "<group>"; };
 		3FFC02D3757E31A2118833F0 /* MissionsFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionsFeature.swift; sourceTree = "<group>"; };
+		43C7A2ADE90E156BE9CC4185 /* LogIncidentFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogIncidentFeature.swift; sourceTree = "<group>"; };
 		4665BDA1910FCA134F24A656 /* Incident.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Incident.swift; sourceTree = "<group>"; };
 		4E21FD0771F895C19ABA113E /* Schema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Schema.swift; sourceTree = "<group>"; };
 		5F6A310465EF61A9CD9DDB16 /* Staff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Staff.swift; sourceTree = "<group>"; };
 		6814058CDFDE809198B36CFA /* AskariAIApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskariAIApp.swift; sourceTree = "<group>"; };
 		6E360C7261A5561E794BCC41 /* SystemManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemManager.swift; sourceTree = "<group>"; };
+		794FD9C8EBB1AFE803D5CCC7 /* RangerMapFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RangerMapFeature.swift; sourceTree = "<group>"; };
 		7E5FCD93FAB339AECEE0DB8A /* DashboardFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardFeature.swift; sourceTree = "<group>"; };
 		8E1A7EB4CD9062E3318CD4D9 /* ActiveMissionFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveMissionFeature.swift; sourceTree = "<group>"; };
 		8FA0EEC003026D19AD6AA559 /* _Secrets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = _Secrets.swift; sourceTree = "<group>"; };
 		96456BD7E32739FA5E0A4D56 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		9FF6825CB4611A063296BE39 /* ParkBoundary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParkBoundary.swift; sourceTree = "<group>"; };
 		A51DB6B53A3E0E0E2316D09E /* SupabaseConnector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseConnector.swift; sourceTree = "<group>"; };
 		A7268DB2D4DCD1F52EEC1850 /* AskariAI.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AskariAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CBC45441A08DE8F42BF821BD /* CactusTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CactusTools.swift; sourceTree = "<group>"; };
@@ -69,14 +70,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				60CD890C2F65F6B60086957A /* Realtime in Frameworks */,
-				60CD890A2F65F6B60086957A /* PostgREST in Frameworks */,
-				60CD89082F65F6B60086957A /* Functions in Frameworks */,
-				60B536412F66894F00B65D12 /* PowerSync in Frameworks */,
-				60CD890E2F65F6B60086957A /* Storage in Frameworks */,
-				60CD89102F65F6B60086957A /* Supabase in Frameworks */,
+				AC88A8F1960CC858311B14FD /* PowerSync in Frameworks */,
+				159E82C576DD635AC1FF3386 /* Supabase in Frameworks */,
 				FBDBEFE81DB86962615850D0 /* ComposableArchitecture in Frameworks */,
-				60CD89062F65F6B60086957A /* Auth in Frameworks */,
 				E17AB331523583833DB20BFA /* Cactus in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -154,6 +150,7 @@
 				4665BDA1910FCA134F24A656 /* Incident.swift */,
 				CEDAC0B7C1EC02C93FBADAC7 /* Mission.swift */,
 				DF4E1FBD7FDC0E87ABE499C1 /* ParkBlock.swift */,
+				9FF6825CB4611A063296BE39 /* ParkBoundary.swift */,
 				081CA72D1FB8F12267DA287B /* SpotType.swift */,
 				5F6A310465EF61A9CD9DDB16 /* Staff.swift */,
 			);
@@ -251,6 +248,8 @@
 		B46457CD0EE21DB8BDED3268 /* Incidents */ = {
 			isa = PBXGroup;
 			children = (
+				43C7A2ADE90E156BE9CC4185 /* LogIncidentFeature.swift */,
+				794FD9C8EBB1AFE803D5CCC7 /* RangerMapFeature.swift */,
 			);
 			path = Incidents;
 			sourceTree = "<group>";
@@ -321,15 +320,10 @@
 			);
 			name = AskariAI;
 			packageProductDependencies = (
+				3A0CFA36E88EA00133150E3A /* PowerSync */,
+				65B239A6E81736B32914E1F3 /* Supabase */,
 				24CE88DDBE74F154482ECC2B /* ComposableArchitecture */,
 				43D3DDC471A88D640846B53C /* Cactus */,
-				60CD89052F65F6B60086957A /* Auth */,
-				60CD89072F65F6B60086957A /* Functions */,
-				60CD89092F65F6B60086957A /* PostgREST */,
-				60CD890B2F65F6B60086957A /* Realtime */,
-				60CD890D2F65F6B60086957A /* Storage */,
-				60CD890F2F65F6B60086957A /* Supabase */,
-				60B536402F66894F00B65D12 /* PowerSync */,
 			);
 			productName = AskariAI;
 			productReference = A7268DB2D4DCD1F52EEC1850 /* AskariAI.app */;
@@ -342,10 +336,9 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 2620;
+				LastUpgradeCheck = 1600;
 				TargetAttributes = {
 					73A4B46F6C877E9AF8B973A9 = {
-						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -362,8 +355,8 @@
 			packageReferences = (
 				4BCD2F6C596BFE2507DC8D95 /* XCRemoteSwiftPackageReference "swift-cactus" */,
 				42E23C3942C0E77E146C8C51 /* XCRemoteSwiftPackageReference "swift-composable-architecture" */,
-				60CD89042F65F6B60086957A /* XCRemoteSwiftPackageReference "supabase-swift" */,
-				60B5363F2F66894F00B65D12 /* XCRemoteSwiftPackageReference "powersync-swift" */,
+				50AD6F86C2FBA59CBB6F4371 /* XCRemoteSwiftPackageReference "powersync-swift" */,
+				D2FA8CF71B240B9F559A8D78 /* XCRemoteSwiftPackageReference "supabase-swift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 86CCAE0A0926DC00F868040B /* Products */;
@@ -400,11 +393,14 @@
 				36E79775455533A5719F5A5A /* CopilotChatView.swift in Sources */,
 				4263C35CB7C2D8C142C5F6EF /* DashboardFeature.swift in Sources */,
 				CBF5BB4669BF2E4D204549BF /* Incident.swift in Sources */,
+				5B7556454DEFABA19E70FF94 /* LogIncidentFeature.swift in Sources */,
 				696140F631C283BE9132D1F3 /* MainFeature.swift in Sources */,
 				4DE109B32A70F9E404181F05 /* Mission.swift in Sources */,
 				B9B7BB2823599931B093CF45 /* MissionsFeature.swift in Sources */,
 				AEDC492CC01A3889D03CFA9D /* ParkBlock.swift in Sources */,
+				BE90734F35AC7A9C395BB993 /* ParkBoundary.swift in Sources */,
 				528A2212E667578465143707 /* RangerCopilotFeature.swift in Sources */,
+				CD1FCB25502A196F585C9B7F /* RangerMapFeature.swift in Sources */,
 				D8EA6174FE6C94D0753634A4 /* Schema.swift in Sources */,
 				25531ABFFEBCEF69074BCE1F /* SpotType.swift in Sources */,
 				348FC686B90F57666BA30D25 /* Staff.swift in Sources */,
@@ -424,6 +420,7 @@
 				CODE_SIGN_ENTITLEMENTS = AskariAI/Resources/AskariAI.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = DRQW8FC957;
 				INFOPLIST_FILE = AskariAI/Resources/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -443,7 +440,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
@@ -480,7 +476,6 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -501,7 +496,6 @@
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = AskariAI;
 				SDKROOT = iphoneos;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 6.0;
@@ -513,7 +507,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
@@ -550,7 +543,6 @@
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -564,7 +556,6 @@
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = AskariAI;
 				SDKROOT = iphoneos;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 6.0;
@@ -579,6 +570,7 @@
 				CODE_SIGN_ENTITLEMENTS = AskariAI/Resources/AskariAI.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = DRQW8FC957;
 				INFOPLIST_FILE = AskariAI/Resources/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -634,20 +626,20 @@
 				minimumVersion = 2.0.0;
 			};
 		};
-		60B5363F2F66894F00B65D12 /* XCRemoteSwiftPackageReference "powersync-swift" */ = {
+		50AD6F86C2FBA59CBB6F4371 /* XCRemoteSwiftPackageReference "powersync-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/powersync-ja/powersync-swift";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 1.13.0;
+				minimumVersion = 1.0.0;
 			};
 		};
-		60CD89042F65F6B60086957A /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+		D2FA8CF71B240B9F559A8D78 /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/supabase/supabase-swift";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 2.5.1;
+				minimumVersion = 2.0.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -658,44 +650,19 @@
 			package = 42E23C3942C0E77E146C8C51 /* XCRemoteSwiftPackageReference "swift-composable-architecture" */;
 			productName = ComposableArchitecture;
 		};
+		3A0CFA36E88EA00133150E3A /* PowerSync */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 50AD6F86C2FBA59CBB6F4371 /* XCRemoteSwiftPackageReference "powersync-swift" */;
+			productName = PowerSync;
+		};
 		43D3DDC471A88D640846B53C /* Cactus */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 4BCD2F6C596BFE2507DC8D95 /* XCRemoteSwiftPackageReference "swift-cactus" */;
 			productName = Cactus;
 		};
-		60B536402F66894F00B65D12 /* PowerSync */ = {
+		65B239A6E81736B32914E1F3 /* Supabase */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 60B5363F2F66894F00B65D12 /* XCRemoteSwiftPackageReference "powersync-swift" */;
-			productName = PowerSync;
-		};
-		60CD89052F65F6B60086957A /* Auth */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 60CD89042F65F6B60086957A /* XCRemoteSwiftPackageReference "supabase-swift" */;
-			productName = Auth;
-		};
-		60CD89072F65F6B60086957A /* Functions */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 60CD89042F65F6B60086957A /* XCRemoteSwiftPackageReference "supabase-swift" */;
-			productName = Functions;
-		};
-		60CD89092F65F6B60086957A /* PostgREST */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 60CD89042F65F6B60086957A /* XCRemoteSwiftPackageReference "supabase-swift" */;
-			productName = PostgREST;
-		};
-		60CD890B2F65F6B60086957A /* Realtime */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 60CD89042F65F6B60086957A /* XCRemoteSwiftPackageReference "supabase-swift" */;
-			productName = Realtime;
-		};
-		60CD890D2F65F6B60086957A /* Storage */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 60CD89042F65F6B60086957A /* XCRemoteSwiftPackageReference "supabase-swift" */;
-			productName = Storage;
-		};
-		60CD890F2F65F6B60086957A /* Supabase */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 60CD89042F65F6B60086957A /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			package = D2FA8CF71B240B9F559A8D78 /* XCRemoteSwiftPackageReference "supabase-swift" */;
 			productName = Supabase;
 		};
 /* End XCSwiftPackageProductDependency section */

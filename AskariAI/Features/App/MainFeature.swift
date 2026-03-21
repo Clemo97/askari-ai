@@ -14,7 +14,8 @@ struct MainFeature {
         var missions: MissionsFeature.State = .init()
         var activeMission: ActiveMissionFeature.State? = nil
         var dashboard: DashboardFeature.State = .init()
-        var selectedTab: Tab = .missions
+        var rangerMap: RangerMapFeature.State = .init()
+        var selectedTab: Tab = .map
 
         enum Tab: Equatable {
             case missions, map, staff, settings
@@ -27,6 +28,7 @@ struct MainFeature {
         case missions(MissionsFeature.Action)
         case activeMission(ActiveMissionFeature.Action)
         case dashboard(DashboardFeature.Action)
+        case rangerMap(RangerMapFeature.Action)
         case selectTab(State.Tab)
     }
 
@@ -37,11 +39,14 @@ struct MainFeature {
         Scope(state: \.dashboard, action: \.dashboard) {
             DashboardFeature()
         }
+        Scope(state: \.rangerMap, action: \.rangerMap) {
+            RangerMapFeature()
+        }
         Reduce { state, action in
             switch action {
             case .onAppear:
                 return .run { send in
-                    let user = try? await systemManager.getCurrentUser()
+                    let user = try? await systemManager.connector.fetchCurrentStaff()
                     await send(.setCurrentUser(user))
                 }
 
@@ -70,16 +75,18 @@ struct MainView: View {
             get: { store.selectedTab },
             set: { store.send(.selectTab($0)) }
         )) {
+            NavigationStack {
+                RangerMapView(store: store.scope(state: \.rangerMap, action: \.rangerMap))
+            }
+            .tabItem { Label("Map", systemImage: "map.fill") }
+            .tag(MainFeature.State.Tab.map)
+
             MissionsView(store: store.scope(state: \.missions, action: \.missions))
-                .tabItem { Label("Missions", systemImage: "map.fill") }
+                .tabItem { Label("Missions", systemImage: "list.bullet.clipboard.fill") }
                 .tag(MainFeature.State.Tab.missions)
 
             DashboardView(store: store.scope(state: \.dashboard, action: \.dashboard))
                 .tabItem { Label("Intelligence", systemImage: "chart.bar.xaxis") }
-                .tag(MainFeature.State.Tab.map)
-
-            Text("Staff")
-                .tabItem { Label("Staff", systemImage: "person.3.fill") }
                 .tag(MainFeature.State.Tab.staff)
 
             Text("Settings")
@@ -90,3 +97,4 @@ struct MainView: View {
         .tint(.green)
     }
 }
+

@@ -6,78 +6,28 @@
 config:
   edition: 3
 
+# Global bucket — syncs everything to every device.
+# Simple, no filtering. Suitable for hackathon / small single-park deployments.
 streams:
-  # ── Priority 0 ─ Park identity ─────────────────────────────────────────────
-  parks:
+  global_data:
     auto_subscribe: true
     priority: 0
     queries:
       - SELECT * FROM parks
       - SELECT * FROM park_boundaries
-
-  # ── Priority 1 ─ Patrol zones ─────────────────────────────────────────────
-  park_blocks:
-    auto_subscribe: true
-    priority: 1
-    query: SELECT * FROM park_blocks WHERE park_id IN (
-        SELECT id FROM parks
-      )
-
-  # ── Priority 2 ─ Operational data ─────────────────────────────────────────
-  reference_data:
-    auto_subscribe: true
-    priority: 2
-    queries:
+      - SELECT * FROM park_blocks
       - SELECT * FROM spot_types
       - SELECT * FROM terrains
       - SELECT * FROM mission_role_types
+      - SELECT * FROM staff
+      - SELECT * FROM missions
+      - SELECT * FROM staff_mission
+      - SELECT * FROM map_features
+      - SELECT * FROM mission_track
+      - SELECT * FROM mission_scores
+      - SELECT * FROM filter_presets
+      - SELECT * FROM attachments
 
-  my_presets:
-    auto_subscribe: true
-    priority: 2
-    query: SELECT * FROM filter_presets WHERE owner_id = auth.user_id()
-
-  my_staff:
-    auto_subscribe: true
-    priority: 2
-    query: SELECT * FROM staff WHERE user_id = auth.user_id()
-
-  active_missions:
-    auto_subscribe: true
-    priority: 2
-    queries:
-      - SELECT * FROM missions WHERE status IN ('current', 'future')
-      - SELECT * FROM staff_mission WHERE mission_id IN (
-            SELECT id FROM missions WHERE status IN ('current', 'future')
-          )
-      - SELECT * FROM staff WHERE id IN (
-            SELECT staff_id FROM staff_mission WHERE mission_id IN (
-              SELECT id FROM missions WHERE status IN ('current', 'future')
-            )
-          )
-
-  # ── Priority 3 ─ Incidents, GPS tracks, scores ────────────────────────────
-  incidents:
-    auto_subscribe: true
-    priority: 3
-    query: SELECT * FROM map_features WHERE mission_id IN (
-        SELECT id FROM missions WHERE status IN ('current', 'future')
-      )
-
-  gps_and_scores:
-    auto_subscribe: true
-    priority: 3
-    queries:
-      - SELECT * FROM mission_track WHERE mission_id IN (
-            SELECT id FROM missions WHERE status IN ('current', 'future')
-          )
-      - SELECT * FROM mission_scores WHERE mission_id IN (
-            SELECT id FROM missions WHERE status IN ('current', 'future')
-          )
-
-
-streams:
-  # ── Priority 0 ─ Park identity ─────────────────────────────────────────────
   # waitForFirstSync(priority: 0) in SystemManager.connect() blocks until this
   # stream has fully synced.
   park_boundaries:

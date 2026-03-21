@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import PowerSync
 
 // MARK: - SpotType
 
@@ -39,9 +40,27 @@ extension SpotType {
     }
 }
 
-// MARK: - PowerSync row → SpotType
+// MARK: - PowerSync cursor → SpotType
 
 extension SpotType {
+    init?(cursor: any SqlCursor) {
+        guard
+            let idStr = try? cursor.getString(name: "id"), let id = UUID(uuidString: idStr),
+            let codeName = try? cursor.getString(name: "code_name"),
+            let displayName = try? cursor.getString(name: "display_name")
+        else { return nil }
+
+        self.id = id
+        self.codeName = codeName
+        self.displayName = displayName
+        self.colorHex = (try? cursor.getString(name: "color_hex")) ?? "#FF6B00"
+        self.isActive = ((try? cursor.getIntOptional(name: "is_active")) ?? 1) != 0
+        self.sortOrder = (try? cursor.getIntOptional(name: "sort_order")) ?? 0
+        self.description = (try? cursor.getStringOptional(name: "description")) ?? ""
+        self.severityDefault = (try? cursor.getString(name: "severity_default")) ?? "medium"
+    }
+
+    // Legacy dict-based init (kept for compatibility)
     init?(row: [String: String?]) {
         guard
             let idStr = row["id"] as? String, let id = UUID(uuidString: idStr),
