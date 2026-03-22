@@ -20,12 +20,18 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Used to photograph and video evidence during patrol incidents.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Used to track patrol GPS route during active missions.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Used to track patrol GPS route during active missions.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Used for voice incident logging in the field — all processing happens on-device.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Saves incident photos and videos to your device library.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Accesses your photo library to attach existing media to incident reports.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>

@@ -1,6 +1,7 @@
 import ComposableArchitecture
 import CoreLocation
 import SwiftUI
+import UIKit
 
 // MARK: - LogIncidentFeature
 
@@ -19,6 +20,9 @@ struct LogIncidentFeature {
         var selectedMissionId: UUID? = nil
         var isSaving = false
         var errorMessage: String? = nil
+        var mediaItems: [MediaItem] = []
+        var showingMediaPicker = false
+        var imagePickerSourceType: UIImagePickerController.SourceType = .camera
 
         // CLLocationCoordinate2D doesn't conform to Equatable
         static func == (lhs: State, rhs: State) -> Bool {
@@ -31,7 +35,9 @@ struct LogIncidentFeature {
             lhs.activeMissions == rhs.activeMissions &&
             lhs.selectedMissionId == rhs.selectedMissionId &&
             lhs.isSaving == rhs.isSaving &&
-            lhs.errorMessage == rhs.errorMessage
+            lhs.errorMessage == rhs.errorMessage &&
+            lhs.mediaItems == rhs.mediaItems &&
+            lhs.showingMediaPicker == rhs.showingMediaPicker
         }
     }
 
@@ -40,6 +46,11 @@ struct LogIncidentFeature {
         case onAppear
         case spotTypesLoaded([SpotType])
         case missionsLoaded([Mission])
+        case showCamera
+        case showPhotoLibrary
+        case mediaAdded(MediaItem)
+        case removeMedia(Int)
+        case dismissMediaPicker
         case save
         case saved
         case cancel
@@ -96,6 +107,7 @@ struct LogIncidentFeature {
                 let description = state.description
                 let severity = state.severity
                 let missionId = state.selectedMissionId
+                let mediaItems = state.mediaItems
 
                 return .run { send in
                     do {
@@ -122,6 +134,28 @@ struct LogIncidentFeature {
                             parkId = firstPark
                         }
 
+                        // Upload media items and collect PowerSync attachment IDs
+                        var attachmentIds: [String] = []
+                        for item in mediaItems {
+                            if let queue = systemManager.attachments,
+                               let attachment = try? await queue.saveFile(
+                                data: item.data,
+                                mediaType: item.mimeType,
+                                fileExtension: item.fileExtension,
+                                updateHook: { _, _ in }
+                               ) {
+                                attachmentIds.append(attachment.id)
+                            }
+                        }
+
+                        let mediaJSON: String
+                        if let encoded = try? JSONEncoder().encode(attachmentIds),
+                           let str = String(data: encoded, encoding: .utf8) {
+                            mediaJSON = str
+                        } else {
+                            mediaJSON = "[]"
+                        }
+
                         let incidentId = UUID()
                         let geoJSON = """
                             {"type":"Point","coordinates":[\(coordinate.longitude),\(coordinate.latitude)]}
@@ -134,7 +168,7 @@ struct LogIncidentFeature {
                                     (id, park_id, mission_id, spot_type_id, name, description,
                                      geometry, created_by, captured_by_staff_id,
                                      severity, media_url, is_resolved)
-                                VALUES (?,?,?,?,?,?,?,?,?,?,'[]',0)
+                                VALUES (?,?,?,?,?,?,?,?,?,?,?,0)
                             """,
                             parameters: [
                                 incidentId.uuidString,
@@ -146,7 +180,8 @@ struct LogIncidentFeature {
                                 geoJSON,
                                 staff.id.uuidString,
                                 staff.id.uuidString,
-                                severity.rawValue
+                                severity.rawValue,
+                                mediaJSON
                             ]
                         )
                         await send(.saved)
@@ -154,6 +189,30 @@ struct LogIncidentFeature {
                         await send(.setError(error.localizedDescription))
                     }
                 }
+
+            case .showCamera:
+                state.imagePickerSourceType = .camera
+                state.showingMediaPicker = true
+                return .none
+
+            case .showPhotoLibrary:
+                state.imagePickerSourceType = .photoLibrary
+                state.showingMediaPicker = true
+                return .none
+
+            case .mediaAdded(let item):
+                state.mediaItems.append(item)
+                state.showingMediaPicker = false
+                return .none
+
+            case .removeMedia(let index):
+                guard index < state.mediaItems.count else { return .none }
+                state.mediaItems.remove(at: index)
+                return .none
+
+            case .dismissMediaPicker:
+                state.showingMediaPicker = false
+                return .none
 
             case .setError(let msg):
                 state.isSaving = false
@@ -233,6 +292,62 @@ struct LogIncidentSheet: View {
                         .lineLimit(4...)
                 }
 
+                Section("Evidence") {
+                    if !store.mediaItems.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(Array(store.mediaItems.enumerated()), id: \.offset) { index, item in
+                                    ZStack(alignment: .topTrailing) {
+                                        if item.isVideo {
+                                            ZStack {
+                                                Color.black
+                                                Image(systemName: "video.fill")
+                                                    .foregroundColor(.white)
+                                                    .font(.title2)
+                                            }
+                                            .frame(width: 80, height: 80)
+                                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        } else if let uiImage = UIImage(data: item.data) {
+                                            Image(uiImage: uiImage)
+                                                .resizable()
+                                                .scaledToFill()
+                                                .frame(width: 80, height: 80)
+                                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        }
+                                        Button {
+                                            store.send(.removeMedia(index))
+                                        } label: {
+                                            Image(systemName: "xmark.circle.fill")
+                                                .foregroundStyle(.white, .black.opacity(0.6))
+                                                .font(.headline)
+                                        }
+                                        .offset(x: 4, y: -4)
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+
+                    HStack(spacing: 16) {
+                        Button {
+                            store.send(.showCamera)
+                        } label: {
+                            Label("Camera", systemImage: "camera.fill")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(store.isSaving)
+
+                        Button {
+                            store.send(.showPhotoLibrary)
+                        } label: {
+                            Label("Library", systemImage: "photo.on.rectangle")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(store.isSaving)
+                    }
+                }
+
                 if let error = store.errorMessage {
                     Section {
                         Text(error)
@@ -260,6 +375,17 @@ struct LogIncidentSheet: View {
                     }
                     .disabled(store.isSaving || store.selectedSpotTypeId == nil)
                 }
+            }
+            .sheet(isPresented: $store.showingMediaPicker) {
+                ImagePickerView(
+                    sourceType: store.imagePickerSourceType,
+                    mediaTypes: store.imagePickerSourceType == .camera
+                        ? ["public.image", "public.movie"]
+                        : ["public.image", "public.movie"],
+                    onCapture: { item in store.send(.mediaAdded(item)) },
+                    onCancel: { store.send(.dismissMediaPicker) }
+                )
+                .ignoresSafeArea()
             }
             .onAppear { store.send(.onAppear) }
         }

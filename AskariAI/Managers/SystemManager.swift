@@ -84,14 +84,25 @@ final class SystemManager: @unchecked Sendable {
                 ),
                 attachmentsDirectory: attachmentsDir,
                 watchAttachments: {
-                    // Watch map_features rows that have a media_url (attachment filename)
+                    // Expand JSON arrays stored in media_url (e.g. ["uuid1","uuid2"])
+                    // into one WatchedAttachmentItem per attachment ID.
                     try localDb.watch(
-                        sql: "SELECT id, media_url FROM map_features WHERE media_url IS NOT NULL AND media_url != '[]'",
+                        sql: """
+                            SELECT je.value AS attachment_id
+                            FROM map_features, json_each(
+                                CASE
+                                    WHEN media_url LIKE '[%' THEN media_url
+                                    ELSE '[]'
+                                END
+                            ) AS je
+                            WHERE media_url IS NOT NULL
+                              AND media_url != '[]'
+                              AND je.value NOT LIKE 'http%'
+                        """,
                         parameters: []
                     ) { cursor in
-                        let id = (try? cursor.getString(name: "id")) ?? UUID().uuidString
-                        let mediaUrl = ((try? cursor.getStringOptional(name: "media_url")) ?? nil) ?? "\(id).jpg"
-                        return WatchedAttachmentItem(id: id, filename: mediaUrl)
+                        let id = (try? cursor.getString(name: "attachment_id")) ?? UUID().uuidString
+                        return WatchedAttachmentItem(id: id, filename: id)
                     }
                 }
             )

@@ -46,6 +46,9 @@ targets:
         UILaunchScreen:
           UIColorName: ""
         NSMicrophoneUsageDescription: "Used for voice incident logging in the field — all processing happens on-device."
+        NSCameraUsageDescription: "Used to photograph and video evidence during patrol incidents."
+        NSPhotoLibraryAddUsageDescription: "Saves incident photos and videos to your device library."
+        NSPhotoLibraryUsageDescription: "Accesses your photo library to attach existing media to incident reports."
         NSLocationWhenInUseUsageDescription: "Used to track patrol GPS route during active missions."
         NSLocationAlwaysAndWhenInUseUsageDescription: "Used to track patrol GPS route during active missions."
         UIBackgroundModes:
