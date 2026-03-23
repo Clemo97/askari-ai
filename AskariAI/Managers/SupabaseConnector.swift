@@ -154,13 +154,17 @@ final class SupabaseConnector: PowerSyncBackendConnectorProtocol, @unchecked Sen
         )
     }
 
-    func signUp(email: String, password: String, firstName: String, lastName: String) async throws {
-        // Pass name as user metadata — a SECURITY DEFINER trigger on auth.users
-        // will create the staff row, bypassing RLS.
+    func signUp(email: String, password: String, firstName: String, lastName: String, rank: String = "ranger") async throws {
+        // Pass name and rank as user metadata — a SECURITY DEFINER trigger on auth.users
+        // will create the staff row with the correct rank, bypassing RLS.
         try await client.auth.signUp(
             email: email,
             password: password,
-            data: ["first_name": .string(firstName), "last_name": .string(lastName)]
+            data: [
+                "first_name": .string(firstName),
+                "last_name": .string(lastName),
+                "rank": .string(rank)
+            ]
         )
     }
 }

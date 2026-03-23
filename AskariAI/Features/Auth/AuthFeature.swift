@@ -112,13 +112,15 @@ struct AuthFeature {
                 let password = state.password
                 let firstName = state.firstName
                 let lastName = state.lastName
+                let rank = state.portal == .admin ? "admin" : "ranger"
                 return .run { send in
                     do {
                         try await systemManager.connector.signUp(
                             email: email,
                             password: password,
                             firstName: firstName,
-                            lastName: lastName
+                            lastName: lastName,
+                            rank: rank
                         )
                         try await systemManager.connector.signIn(email: email, password: password)
                         try await Task.sleep(for: .seconds(1))
