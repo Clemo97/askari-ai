@@ -51,6 +51,8 @@ bucket_definitions:
 
   # ── Global reference data (all users) ────────────────────────────────────
   global_reference:
+    parameters:
+      - SELECT 1 AS dummy
     data:
       - SELECT * FROM spot_types WHERE spot_types.is_active = true
       - SELECT * FROM mission_role_types
