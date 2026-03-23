@@ -60,17 +60,36 @@ struct QueryRecentIncidentsTool: CactusFunction {
         let rows = try await db.getAll(sql: sql, parameters: params, mapper: cursorToDict)
 
         if rows.isEmpty {
-            return "No incidents found over the last \(input.daysBack) days\(input.incidentType.isEmpty ? "" : " for type: \(input.incidentType)")."
+            let typeLabel = input.incidentType.isEmpty ? "" : " for \(input.incidentType)"
+            return "No incidents found in the last \(input.daysBack) day(s)\(typeLabel)."
         }
 
-        return rows.map { row -> String in
-            let type = row["spot_type"] as? String ?? row["name"] as? String ?? "Unknown"
-            let desc = row["description"] as? String ?? ""
+        let formatted = rows.enumerated().map { i, row -> String in
+            let type = row["spot_type"] as? String ?? "Unknown type"
+            let desc = (row["description"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let ranger = row["ranger_name"] as? String ?? "Unknown ranger"
-            let date = row["created_at"] as? String ?? ""
-            let severity = row["severity"] as? String ?? ""
-            return "[\(type)] \(desc) — by \(ranger) on \(date) [\(severity)]"
+            let rawDate = row["created_at"] as? String ?? ""
+            let severity = (row["severity"] as? String ?? "").capitalized
+            let dateLabel = Self.formatDate(rawDate)
+            let descPart = desc.isEmpty ? "" : " — \(desc)"
+            return "\(i + 1). \(type)\(descPart)\n   By \(ranger) · \(dateLabel) · \(severity)"
         }.joined(separator: "\n")
+
+        let header = "Found \(rows.count) incident(s) in the last \(input.daysBack) day(s):"
+        return "\(header)\n\(formatted)"
+    }
+
+    private static func formatDate(_ iso: String) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: iso) {
+            let out = DateFormatter()
+            out.dateStyle = .medium
+            out.timeStyle = .short
+            return out.string(from: date)
+        }
+        // Fallback: trim to just date portion
+        return String(iso.prefix(10))
     }
 }
 

@@ -10,7 +10,8 @@ import AVFoundation
 final class AIManager {
     static let shared = AIManager()
 
-    private var agentSession: CactusAgentSession?
+    private var agentSession: CactusAgentSession?       // RangerCopilot (thinking model)
+    private var dashboardModelURL: URL?         // Admin dashboard — stores downloaded model path
     private var sttSession: CactusSTTSession?
     private var vadSession: CactusVADSession?
     private var transcriptionStream: CactusTranscriptionStream?
@@ -47,7 +48,85 @@ final class AIManager {
         vadSession = try CactusVADSession(from: vadURL)
     }
 
-    // MARK: - Natural Language Query
+    // MARK: - Dashboard Natural Language Query
+    //
+    // The thinking model (lfm2_5_1_2bThinking) generates unbounded <think> blocks
+    // and never emits </think> before hitting context limits, making it unusable
+    // for structured output or function-calling dispatch.
+    //
+    // Solution: parse intent and dispatch entirely in Swift (fast, zero-latency,
+    // deterministic). The CactusFunction tool implementations still execute the
+    // actual SQL queries — we just call them from Swift rather than via the LLM.
+    // The downloaded model remains available for RangerCopilotFeature.
+
+    /// Warms the model cache so the binary is ready for RangerCopilot.
+    /// No-op if already downloaded.
+    func loadLLMOnly() async throws {
+        guard dashboardModelURL == nil else { return }
+        dashboardModelURL = try await CactusModelsDirectory.shared.modelURL(
+            for: .lfm2_5_1_2bThinking()
+        )
+    }
+
+    /// Natural-language query → live PowerSync data.
+    /// Intent is parsed in Swift; SQL is executed via CactusFunction tool implementations.
+    func querySingle(_ text: String) async throws -> String {
+        guard dashboardModelURL != nil else { throw AIError.modelsNotLoaded }
+        let intent = parseQueryIntent(text)
+        let result: String
+        switch intent.action {
+        case .rangerStats:
+            let input = GetRangerStatsTool.Input(daysBack: intent.daysBack, limit: intent.limit)
+            result = (try? await GetRangerStatsTool().invoke(input: input)) ?? "No ranger data found."
+        default:
+            let input = QueryRecentIncidentsTool.Input(daysBack: intent.daysBack, incidentType: intent.incidentType)
+            result = (try? await QueryRecentIncidentsTool().invoke(input: input)) ?? "No incidents found."
+        }
+        return result
+    }
+
+    // MARK: - Swift NL Intent Parser
+
+    private enum QueryAction { case queryIncidents, rangerStats }
+
+    private struct QueryIntent {
+        var action: QueryAction = .queryIncidents
+        var daysBack: Int = 7
+        var incidentType: String = ""
+        var limit: Int = 5
+    }
+
+    private func parseQueryIntent(_ text: String) -> QueryIntent {
+        let lower = text.lowercased()
+        var intent = QueryIntent()
+
+        // Action
+        let rangerKeywords = ["ranger", "staff", "leaderboard", "top", "ranking", "performance", "who logged"]
+        if rangerKeywords.contains(where: { lower.contains($0) }) {
+            intent.action = .rangerStats
+        }
+
+        // Days
+        if lower.contains("today") { intent.daysBack = 1 }
+        else if lower.contains("yesterday") { intent.daysBack = 2 }
+        else if lower.contains("month") || lower.contains("30 day") { intent.daysBack = 30 }
+        else if lower.contains("2 week") || lower.contains("14 day") || lower.contains("fortnight") { intent.daysBack = 14 }
+        else if lower.contains("week") || lower.contains("7 day") { intent.daysBack = 7 }
+        else if let match = lower.range(of: #"(\d+)\s*day"#, options: .regularExpression) {
+            intent.daysBack = Int(lower[match].filter(\.isNumber)) ?? 7
+        }
+
+        // Incident type
+        let types = ["snare", "wire", "gin trap", "trap", "carcass", "poacher", "camp", "ivory", "bushmeat"]
+        intent.incidentType = types.first { lower.contains($0) } ?? ""
+
+        // Limit for ranger stats
+        if let match = lower.range(of: #"top\s*(\d+)"#, options: .regularExpression) {
+            intent.limit = Int(lower[match].filter(\.isNumber)) ?? 5
+        }
+
+        return intent
+    }
 
     func query(messages: [RangerCopilotFeature.ChatMessage], missionId: UUID) async throws -> String {
         guard let session = agentSession else {
@@ -203,7 +282,20 @@ private extension AIManager {
     }
 }
 
-// MARK: - System Prompt
+// MARK: - System Prompts
+
+private let dashboardSystemPrompt = """
+You are an AI assistant for Askari AI, a wildlife anti-poaching management system.
+
+When the user asks about incidents, rangers, or activity data:
+1. Call the appropriate tool immediately with the correct parameters.
+2. After receiving the tool results, give a brief 2-3 sentence summary.
+
+Rules:
+- Always call a tool before answering — never guess or invent data.
+- Keep answers short and factual.
+- If no data is returned, say so clearly.
+"""
 
 private let rangerSystemPrompt = """
 You are an AI intelligence copilot for wildlife park rangers. You have access to tools \
