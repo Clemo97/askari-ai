@@ -144,7 +144,7 @@ private struct AttachmentThumbnail: View {
                     .frame(width: 100, height: 100)
                     .background(Color.black, in: RoundedRectangle(cornerRadius: 10))
             } else {
-                Image(systemName: "photo.slash")
+                Image(systemName: "photo")
                     .font(.title2)
                     .foregroundStyle(.secondary)
             }
@@ -196,8 +196,9 @@ private struct AttachmentThumbnail: View {
         guard let asset = assets.firstObject, asset.mediaType == .image else { return nil }
         return await withCheckedContinuation { continuation in
             let opts = PHImageRequestOptions()
-            opts.deliveryMode = .opportunistic
+            opts.deliveryMode = .highQualityFormat
             opts.isNetworkAccessAllowed = false
+            opts.isSynchronous = false
             PHImageManager.default().requestImage(
                 for: asset,
                 targetSize: CGSize(width: 200, height: 200),

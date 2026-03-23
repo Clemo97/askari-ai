@@ -10,7 +10,6 @@ struct Incident: Identifiable, Codable {
     var description: String         // ranger free-text notes
     var coordinate: CLLocationCoordinate2D
     var spotTypeId: UUID?
-    var missionId: UUID?
     var capturedByStaffId: UUID?
     var createdBy: UUID
     var createdAt: Date
@@ -18,8 +17,6 @@ struct Incident: Identifiable, Codable {
     var localMediaIdentifiers: [String] // matching PhotoKit localIdentifiers (positional)
     var parkId: UUID
     var isResolved: Bool
-    var resolvedAt: Date?
-    var resolvedBy: UUID?
     var severity: Severity
 
     enum Severity: String, Codable, CaseIterable {
@@ -28,8 +25,8 @@ struct Incident: Identifiable, Codable {
 
     enum CodingKeys: String, CodingKey {
         case id, name, description, latitude, longitude
-        case spotTypeId, missionId, capturedByStaffId, createdBy, createdAt
-        case mediaAttachmentIds, localMediaIdentifiers, parkId, isResolved, resolvedAt, resolvedBy, severity
+        case spotTypeId, capturedByStaffId, createdBy, createdAt
+        case mediaAttachmentIds, localMediaIdentifiers, parkId, isResolved, severity
     }
 
     init(
@@ -38,7 +35,6 @@ struct Incident: Identifiable, Codable {
         description: String,
         coordinate: CLLocationCoordinate2D,
         spotTypeId: UUID? = nil,
-        missionId: UUID? = nil,
         capturedByStaffId: UUID? = nil,
         createdBy: UUID,
         createdAt: Date = Date(),
@@ -46,8 +42,6 @@ struct Incident: Identifiable, Codable {
         localMediaIdentifiers: [String] = [],
         parkId: UUID,
         isResolved: Bool = false,
-        resolvedAt: Date? = nil,
-        resolvedBy: UUID? = nil,
         severity: Severity = .medium
     ) {
         self.id = id
@@ -55,7 +49,6 @@ struct Incident: Identifiable, Codable {
         self.description = description
         self.coordinate = coordinate
         self.spotTypeId = spotTypeId
-        self.missionId = missionId
         self.capturedByStaffId = capturedByStaffId
         self.createdBy = createdBy
         self.createdAt = createdAt
@@ -63,8 +56,6 @@ struct Incident: Identifiable, Codable {
         self.localMediaIdentifiers = localMediaIdentifiers
         self.parkId = parkId
         self.isResolved = isResolved
-        self.resolvedAt = resolvedAt
-        self.resolvedBy = resolvedBy
         self.severity = severity
     }
 
@@ -78,7 +69,6 @@ struct Incident: Identifiable, Codable {
         let lon = try c.decode(Double.self, forKey: .longitude)
         coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lon)
         spotTypeId = try c.decodeIfPresent(UUID.self, forKey: .spotTypeId)
-        missionId = try c.decodeIfPresent(UUID.self, forKey: .missionId)
         capturedByStaffId = try c.decodeIfPresent(UUID.self, forKey: .capturedByStaffId)
         localMediaIdentifiers = (try? c.decode([String].self, forKey: .localMediaIdentifiers)) ?? []
         createdBy = try c.decode(UUID.self, forKey: .createdBy)
@@ -86,8 +76,6 @@ struct Incident: Identifiable, Codable {
         mediaAttachmentIds = try c.decode([String].self, forKey: .mediaAttachmentIds)
         parkId = try c.decode(UUID.self, forKey: .parkId)
         isResolved = try c.decode(Bool.self, forKey: .isResolved)
-        resolvedAt = try c.decodeIfPresent(Date.self, forKey: .resolvedAt)
-        resolvedBy = try c.decodeIfPresent(UUID.self, forKey: .resolvedBy)
         severity = try c.decode(Severity.self, forKey: .severity)
     }
 
@@ -99,15 +87,12 @@ struct Incident: Identifiable, Codable {
         try c.encode(coordinate.latitude, forKey: .latitude)
         try c.encode(coordinate.longitude, forKey: .longitude)
         try c.encodeIfPresent(spotTypeId, forKey: .spotTypeId)
-        try c.encodeIfPresent(missionId, forKey: .missionId)
         try c.encodeIfPresent(capturedByStaffId, forKey: .capturedByStaffId)
         try c.encode(createdBy, forKey: .createdBy)
         try c.encode(createdAt, forKey: .createdAt)
         try c.encode(mediaAttachmentIds, forKey: .mediaAttachmentIds)
         try c.encode(parkId, forKey: .parkId)
         try c.encode(isResolved, forKey: .isResolved)
-        try c.encodeIfPresent(resolvedAt, forKey: .resolvedAt)
-        try c.encodeIfPresent(resolvedBy, forKey: .resolvedBy)
         try c.encode(severity, forKey: .severity)
     }
 }
@@ -154,7 +139,6 @@ extension Incident {
             description: (try? cursor.getStringOptional(name: "description")) ?? "",
             coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon),
             spotTypeId: (try? cursor.getStringOptional(name: "spot_type_id")).flatMap { $0 }.flatMap(UUID.init),
-            missionId: (try? cursor.getStringOptional(name: "mission_id")).flatMap { $0 }.flatMap(UUID.init),
             capturedByStaffId: (try? cursor.getStringOptional(name: "captured_by_staff_id")).flatMap { $0 }.flatMap(UUID.init),
             createdBy: createdBy,
             createdAt: createdAt,
@@ -162,8 +146,6 @@ extension Incident {
             localMediaIdentifiers: localIds,
             parkId: parkId,
             isResolved: ((try? cursor.getIntOptional(name: "is_resolved")) ?? 0) == 1,
-            resolvedAt: SystemManager.parseDate((try? cursor.getStringOptional(name: "resolved_at")) ?? nil),
-            resolvedBy: (try? cursor.getStringOptional(name: "resolved_by")).flatMap { $0 }.flatMap(UUID.init),
             severity: Severity(rawValue: (try? cursor.getStringOptional(name: "severity")) ?? "medium") ?? .medium
         )
     }
@@ -201,7 +183,6 @@ extension Incident {
             description: row["description"] as? String ?? "",
             coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon),
             spotTypeId: (row["spot_type_id"] as? String).flatMap(UUID.init),
-            missionId: (row["mission_id"] as? String).flatMap(UUID.init),
             capturedByStaffId: (row["captured_by_staff_id"] as? String).flatMap(UUID.init),
             createdBy: createdBy,
             createdAt: createdAt,
@@ -209,8 +190,6 @@ extension Incident {
             localMediaIdentifiers: localIds,
             parkId: parkId,
             isResolved: (row["is_resolved"] as? String) == "1",
-            resolvedAt: SystemManager.parseDate(row["resolved_at"] as? String),
-            resolvedBy: (row["resolved_by"] as? String).flatMap(UUID.init),
             severity: Severity(rawValue: row["severity"] as? String ?? "medium") ?? .medium
         )
     }
@@ -256,7 +235,6 @@ extension Incident: Equatable {
         lhs.coordinate.latitude == rhs.coordinate.latitude &&
         lhs.coordinate.longitude == rhs.coordinate.longitude &&
         lhs.spotTypeId == rhs.spotTypeId &&
-        lhs.missionId == rhs.missionId &&
         lhs.capturedByStaffId == rhs.capturedByStaffId &&
         lhs.createdBy == rhs.createdBy &&
         lhs.createdAt == rhs.createdAt &&
@@ -264,8 +242,6 @@ extension Incident: Equatable {
         lhs.localMediaIdentifiers == rhs.localMediaIdentifiers &&
         lhs.parkId == rhs.parkId &&
         lhs.isResolved == rhs.isResolved &&
-        lhs.resolvedAt == rhs.resolvedAt &&
-        lhs.resolvedBy == rhs.resolvedBy &&
         lhs.severity == rhs.severity
     }
 }

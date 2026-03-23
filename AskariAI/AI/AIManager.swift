@@ -150,9 +150,8 @@ final class AIManager {
         let message = CactusUserMessage {
             """
             [VOICE INCIDENT LOG] The ranger said: "\(transcription)"
-            
+
             Parse this as an incident and call log_incident with the appropriate fields.
-            Mission ID: \(missionId.uuidString)
             """
         }
         let completion = try await session.respond(to: message)
@@ -166,15 +165,14 @@ final class AIManager {
 
         let message = CactusUserMessage {
             """
-            Generate a pre-patrol briefing for mission ID: \(missionId.uuidString).
-            
-            Call get_mission_summary, get_block_patrol_status, and query_recent_incidents
+            Generate a pre-patrol briefing for the park ranger.
+
+            Call query_recent_incidents (daysBack: 14, incidentType: "") and get_ranger_stats (daysBack: 14, limit: 5)
             to gather data, then write a concise briefing covering:
-            - Recent incidents in assigned blocks (last 14 days)
-            - Blocks that are overdue for patrol
-            - Mission objectives reminder
+            - Recent incidents in the park (last 14 days)
+            - Incident hotspots based on frequency
             - Recommended areas of focus based on incident density
-            
+
             Keep it practical and under 200 words. Write for a ranger about to go on patrol.
             """
         }
@@ -199,8 +197,6 @@ private extension AIManager {
     func makeTools() -> [any CactusFunction] {
         [
             QueryRecentIncidentsTool(),
-            GetBlockPatrolStatusTool(),
-            GetMissionSummaryTool(),
             LogIncidentTool(),
             GetRangerStatsTool(),
         ]

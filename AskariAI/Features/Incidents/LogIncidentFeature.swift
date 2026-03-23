@@ -17,8 +17,6 @@ struct LogIncidentFeature {
         var description: String = ""
         var severity: Incident.Severity = .medium
         var spotTypes: [SpotType] = []
-        var activeMissions: [Mission] = []
-        var selectedMissionId: UUID? = nil
         var isSaving = false
         var errorMessage: String? = nil
         var mediaItems: [MediaItem] = []
@@ -33,8 +31,6 @@ struct LogIncidentFeature {
             lhs.description == rhs.description &&
             lhs.severity == rhs.severity &&
             lhs.spotTypes == rhs.spotTypes &&
-            lhs.activeMissions == rhs.activeMissions &&
-            lhs.selectedMissionId == rhs.selectedMissionId &&
             lhs.isSaving == rhs.isSaving &&
             lhs.errorMessage == rhs.errorMessage &&
             lhs.mediaItems == rhs.mediaItems &&
@@ -46,7 +42,6 @@ struct LogIncidentFeature {
         case binding(BindingAction<State>)
         case onAppear
         case spotTypesLoaded([SpotType])
-        case missionsLoaded([Mission])
         case showCamera
         case showPhotoLibrary
         case mediaAdded(MediaItem)
@@ -63,35 +58,20 @@ struct LogIncidentFeature {
         Reduce { state, action in
             switch action {
             case .onAppear:
-                return .merge(
-                    .run { send in
-                        let types = try await systemManager.db.getAll(
-                            sql: "SELECT * FROM spot_types WHERE is_active = 1 ORDER BY sort_order",
-                            parameters: [],
-                            mapper: { cursor in SpotType(cursor: cursor) }
-                        )
-                        await send(.spotTypesLoaded(types.compactMap { $0 }))
-                    },
-                    .run { send in
-                        let missions = try await systemManager.db.getAll(
-                            sql: "SELECT * FROM missions WHERE status = 'current' ORDER BY start_date DESC",
-                            parameters: [],
-                            mapper: { cursor in Mission(cursor: cursor) }
-                        )
-                        await send(.missionsLoaded(missions.compactMap { $0 }))
-                    }
-                )
+                return .run { send in
+                    let types = try await systemManager.db.getAll(
+                        sql: "SELECT * FROM spot_types WHERE is_active = 1 ORDER BY sort_order",
+                        parameters: [],
+                        mapper: { cursor in SpotType(cursor: cursor) }
+                    )
+                    await send(.spotTypesLoaded(types.compactMap { $0 }))
+                }
 
             case .spotTypesLoaded(let types):
                 state.spotTypes = types
                 if state.selectedSpotTypeId == nil {
                     state.selectedSpotTypeId = types.first?.id
                 }
-                return .none
-
-            case .missionsLoaded(let missions):
-                state.activeMissions = missions
-                state.selectedMissionId = missions.first?.id
                 return .none
 
             case .save:
@@ -107,7 +87,6 @@ struct LogIncidentFeature {
                 let coordinate = state.coordinate
                 let description = state.description
                 let severity = state.severity
-                let missionId = state.selectedMissionId
                 let mediaItems = state.mediaItems
 
                 return .run { send in
@@ -183,16 +162,15 @@ struct LogIncidentFeature {
                         try await systemManager.db.execute(
                             sql: """
                                 INSERT INTO map_features
-                                    (id, park_id, mission_id, spot_type_id, name, description,
+                                    (id, park_id, spot_type_id, name, description,
                                      geometry, created_by, captured_by_staff_id,
                                      severity, media_url, local_media_identifiers,
                                      is_resolved, created_at, updated_at)
-                                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0,?,?)
+                                VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?)
                             """,
                             parameters: [
                                 incidentId.uuidString,
                                 parkId.uuidString,
-                                missionId?.uuidString as (any Sendable)?,
                                 spotType.id.uuidString,
                                 spotType.displayName,
                                 description,
@@ -261,25 +239,21 @@ private func saveToPhotoLibrary(item: MediaItem) async -> String? {
     guard status == .authorized || status == .limited else { return nil }
 
     return await withCheckedContinuation { continuation in
+        var localId: String? = nil
         PHPhotoLibrary.shared().performChanges({
             switch item {
             case .image(let data):
                 if let image = UIImage(data: data) {
-                    let req = PHAssetChangeRequest.creationRequestForAsset(from: image)
-                    continuation.resume(returning: req.placeholderForCreatedAsset?.localIdentifier)
-                } else {
-                    continuation.resume(returning: nil)
+                    localId = PHAssetChangeRequest.creationRequestForAsset(from: image)
+                        .placeholderForCreatedAsset?.localIdentifier
                 }
             case .video(_, let url):
-                guard let url else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-                let req = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
-                continuation.resume(returning: req?.placeholderForCreatedAsset?.localIdentifier)
+                guard let url else { return }
+                localId = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)?
+                    .placeholderForCreatedAsset?.localIdentifier
             }
         }, completionHandler: { success, _ in
-            if !success { continuation.resume(returning: nil) }
+            continuation.resume(returning: success ? localId : nil)
         })
     }
 }
@@ -325,18 +299,6 @@ struct LogIncidentSheet: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                }
-
-                if !store.activeMissions.isEmpty {
-                    Section("Mission (optional)") {
-                        Picker("Mission", selection: $store.selectedMissionId) {
-                            Text("None").tag(Optional<UUID>.none)
-                            ForEach(store.activeMissions) { mission in
-                                Text(mission.name).tag(Optional(mission.id))
-                            }
-                        }
-                        .pickerStyle(.menu)
-                    }
                 }
 
                 Section("Notes") {

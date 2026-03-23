@@ -11,31 +11,24 @@ struct MainFeature {
     @ObservableState
     struct State: Equatable {
         var currentUser: StaffMember? = nil
-        var missions: MissionsFeature.State = .init()
-        var activeMission: ActiveMissionFeature.State? = nil
         var dashboard: DashboardFeature.State = .init()
         var rangerMap: RangerMapFeature.State = .init()
         var selectedTab: Tab = .map
 
         enum Tab: Equatable {
-            case missions, map, staff, settings
+            case map, intelligence, settings
         }
     }
 
     enum Action {
         case onAppear
         case setCurrentUser(StaffMember?)
-        case missions(MissionsFeature.Action)
-        case activeMission(ActiveMissionFeature.Action)
         case dashboard(DashboardFeature.Action)
         case rangerMap(RangerMapFeature.Action)
         case selectTab(State.Tab)
     }
 
     var body: some ReducerOf<Self> {
-        Scope(state: \.missions, action: \.missions) {
-            MissionsFeature()
-        }
         Scope(state: \.dashboard, action: \.dashboard) {
             DashboardFeature()
         }
@@ -81,13 +74,9 @@ struct MainView: View {
             .tabItem { Label("Map", systemImage: "map.fill") }
             .tag(MainFeature.State.Tab.map)
 
-            MissionsView(store: store.scope(state: \.missions, action: \.missions))
-                .tabItem { Label("Missions", systemImage: "list.bullet.clipboard.fill") }
-                .tag(MainFeature.State.Tab.missions)
-
             DashboardView(store: store.scope(state: \.dashboard, action: \.dashboard))
                 .tabItem { Label("Intelligence", systemImage: "chart.bar.xaxis") }
-                .tag(MainFeature.State.Tab.staff)
+                .tag(MainFeature.State.Tab.intelligence)
 
             Text("Settings")
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
