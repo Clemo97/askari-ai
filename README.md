@@ -95,8 +95,8 @@ powersync deploy sync-config
 
 ## Backend
 
-- **Supabase Project:** `zingetplhjqubtydzfpo`
-- **PowerSync Instance:** `https://69b5b2687c4f8b306a1b8255.powersync.journeyapps.com`
+- **Supabase Project:** *(set `supabaseURL` and `supabaseAnonKey` in `_Secrets.swift`)*
+- **PowerSync Instance:** *(set `powerSyncEndpoint` in `_Secrets.swift`)*
 - Schema: see `supabase/migrations/`
 
 ---
