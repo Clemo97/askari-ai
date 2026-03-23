@@ -116,9 +116,8 @@ final class AIManager {
             intent.daysBack = Int(lower[match].filter(\.isNumber)) ?? 7
         }
 
-        // Incident type
-        let types = ["snare", "wire", "gin trap", "trap", "carcass", "poacher", "camp", "ivory", "bushmeat"]
-        intent.incidentType = types.first { lower.contains($0) } ?? ""
+        // Incident type — extracted dynamically so any spot_type the user mentions works.
+        intent.incidentType = Self.extractIncidentType(from: lower)
 
         // Limit for ranger stats
         if let match = lower.range(of: #"top\s*(\d+)"#, options: .regularExpression) {
@@ -127,6 +126,52 @@ final class AIManager {
 
         return intent
     }
+
+    /// Strips filler words from the query and returns what's left as the incident-type search term.
+    /// e.g. "Show spent cartridge from last 7 days" → "spent cartridge"
+    /// e.g. "All snare incidents this week"          → "snare"
+    /// e.g. "Total incidents this month"             → "" (no type filter)
+    private static func extractIncidentType(from lower: String) -> String {
+        // Words that carry no incident-type information
+        let stopWords: Set<String> = [
+            "show", "me", "find", "get", "list", "give", "fetch",
+            "all", "any", "recent", "total", "number", "count", "how", "many",
+            "incidents", "incident", "reports", "report", "events", "event",
+            "logged", "recorded", "from", "in", "the", "last", "past",
+            "this", "today", "yesterday",
+            "week", "weeks", "month", "months", "day", "days", "fortnight",
+            "7", "14", "30", "1", "2", "3",
+        ]
+
+        // Strip trailing date phrases like "last 7 days", "in the past month"
+        var cleaned = lower
+        let datePatterns = [
+            #"(from |in )?(the )?last \d+ days?"#,
+            #"(from |in )?(the )?past \d+ days?"#,
+            #"(from |in )?(the )?last (week|month|fortnight)"#,
+            #"this (week|month|year)"#,
+            #"today|yesterday"#,
+        ]
+        for pattern in datePatterns {
+            if let range = cleaned.range(of: pattern, options: .regularExpression) {
+                cleaned.removeSubrange(range)
+            }
+        }
+
+        // Tokenise and remove stop words
+        let tokens = cleaned
+            .components(separatedBy: CharacterSet.alphanumerics.union(.init(charactersIn: " ")).inverted)
+            .joined(separator: " ")
+            .components(separatedBy: .whitespaces)
+            .filter { !$0.isEmpty && !stopWords.contains($0) && !$0.allSatisfy(\.isNumber) }
+
+        let candidate = tokens.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+
+        // Reject candidates that are just noise (single very common word)
+        let noiseWords: Set<String> = ["incident", "incidents", "report", "activity", "alert"]
+        return noiseWords.contains(candidate) ? "" : candidate
+    }
+
 
     func query(messages: [RangerCopilotFeature.ChatMessage], missionId: UUID) async throws -> String {
         guard let session = agentSession else {

@@ -35,8 +35,12 @@ struct QueryRecentIncidentsTool: CactusFunction {
         var params: [String?] = []
 
         if !input.incidentType.isEmpty {
-            conditions.append("st.code_name LIKE ?")
-            params.append("%\(input.incidentType.lowercased())%")
+            // Match against both code_name (e.g. "spent_cartridge") and
+            // display_name (e.g. "Spent Cartridge") so any user phrasing works.
+            let term: String? = "%\(input.incidentType.lowercased())%"
+            conditions.append("(LOWER(st.code_name) LIKE ? OR LOWER(st.display_name) LIKE ?)")
+            params.append(term)
+            params.append(term)
         }
 
         let whereClause = conditions.isEmpty ? "" : "WHERE " + conditions.joined(separator: " AND ")
