@@ -1,7 +1,6 @@
 # powersync/sync-config.yaml
 # Askari AI — Ranger Intelligence Copilot
 # PowerSync Sync Streams — edition 3
-# Instance: https://69b5b2687c4f8b306a1b8255.powersync.journeyapps.com
 #
 # Single consolidated stream migrated from the original four bucket_definitions.
 # CTE-style `with:` parameters resolve per-user via auth.user_id().

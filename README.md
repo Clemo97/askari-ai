@@ -54,9 +54,125 @@ powersync/
 
 ---
 
-## Setup
+## Getting Started
 
-### 1. Swift Package Dependencies (Xcode SPM)
+### Prerequisites
+
+- **Xcode 16+** (Swift 6 toolchain)
+- **iOS 17+ device or simulator** (on-device AI requires a real device for Whisper/LLM inference)
+- A **Supabase** project
+- A **PowerSync** Cloud instance linked to that Supabase project
+
+---
+
+## 1. Clone and open in Xcode
+
+```bash
+git clone https://github.com/Clemo97/askari-ai.git
+cd askari-ai
+open AskariAI.xcodeproj   # or .xcworkspace if present
+```
+
+Swift Package dependencies resolve automatically on first open. If they don't, go to **File → Packages → Resolve Package Versions**.
+
+---
+
+## 2. Configure Secrets
+
+The app reads credentials from `AskariAI/Managers/_Secrets.swift`, which is gitignored. A template is provided at [AskariAI/Managers/_Secrets.template.swift](AskariAI/Managers/_Secrets.template.swift).
+
+**Copy the template:**
+
+```bash
+cp AskariAI/Managers/_Secrets.template.swift AskariAI/Managers/_Secrets.swift
+```
+
+**Then fill in `_Secrets.swift`:**
+
+```swift
+enum Secrets {
+    static let supabaseURL      = URL(string: "https://<your-project-ref>.supabase.co")!
+    static let supabaseAnonKey  = "<your-supabase-anon-key>"
+    static let powerSyncEndpoint = "https://<your-instance-id>.powersync.journeyapps.com"
+    // Optional — set to your Supabase Storage bucket name to enable media attachments
+    static let supabaseStorageBucket: String? = "incident-media"
+    // Optional — set to your Cactus Cloud key for hybrid AI fallback
+    static let cactusCloudKey: String? = nil
+}
+```
+
+You can find these values at:
+- **Supabase URL + anon key:** Supabase Dashboard → Project Settings → API
+- **PowerSync endpoint:** PowerSync Dashboard → Your Instance → Connection URL
+
+---
+
+## 3. Set up Supabase
+
+### 3a. Run migrations in order
+
+Open the **Supabase SQL Editor** (Dashboard → SQL Editor → New query) and run the migrations in the following order. Each file is in `supabase/migrations/`:
+
+| # | File | What it does |
+|---|------|--------------|
+| 1 | [001_initial_schema.sql](supabase/migrations/001_initial_schema.sql) | Creates all tables: `parks`, `staff`, `spot_types`, `park_boundaries`, `park_blocks`, `missions`, `staff_mission`, `map_features`, `mission_role_types`. Seeds default spot types and role types. |
+| 2 | [002_rls_policies.sql](supabase/migrations/002_rls_policies.sql) | Enables Row Level Security on all tables. Creates helper functions (`auth_staff_id()`, `auth_staff_rank()`, `auth_staff_park_id()`). Rangers read their own park data; admins read all. |
+| 3 | [003_askari_ai_schema.sql](supabase/migrations/003_askari_ai_schema.sql) | Adds `mission_track`, `mission_scores`, `terrains`, `filter_presets`, `attachments` tables used by the full app schema. |
+| 4 | [004_signup_trigger.sql](supabase/migrations/004_signup_trigger.sql) | Creates `handle_new_user()` trigger — automatically inserts a `staff` row when a user signs up via Supabase Auth. |
+| 5 | [005_nairobi_national_park.sql](supabase/migrations/005_nairobi_national_park.sql) | Seeds Nairobi National Park with its real GeoJSON boundary (OpenStreetMap, ODbL licence). Required to log incidents with a valid `park_id`. |
+| 6 | [006_fix_map_features_rls.sql](supabase/migrations/006_fix_map_features_rls.sql) | Fixes map features RLS so rangers can log incidents outside of a mission context. |
+| 7 | [007_add_local_media_identifiers.sql](supabase/migrations/007_add_local_media_identifiers.sql) | Adds `local_media_identifiers` column to `map_features` for device PhotoKit IDs. |
+| 8 | [008_fix_signup_trigger_rank.sql](supabase/migrations/008_fix_signup_trigger_rank.sql) | Updates `handle_new_user()` to read `rank` from signup metadata, allowing admin accounts to be created. |
+
+> **Tip:** You can paste each file's contents directly into the SQL Editor and click **Run**. Run them in order — later migrations depend on tables from earlier ones.
+
+### 3b. Create a Storage bucket (optional — for media attachments)
+
+1. Supabase Dashboard → Storage → Create bucket
+2. Name it `incident-media` (or whatever you set in `_Secrets.supabaseStorageBucket`)
+3. Set it to **Private**
+4. Add a storage policy allowing authenticated users to upload/download their own files
+
+### 3c. Create your first admin user
+
+1. Supabase Dashboard → Authentication → Users → **Invite user**
+2. Or sign up via the app — then update the `staff` row in the SQL editor:
+   ```sql
+   UPDATE staff SET rank = 'admin', park_id = '<park-uuid>' WHERE email = 'you@example.com';
+   ```
+
+---
+
+## 4. Set up PowerSync
+
+### 4a. Link your Supabase project
+
+Follow the [PowerSync Supabase integration guide](https://docs.powersync.com/integration-guides/supabase-+-powersync) to connect your PowerSync instance to your Supabase database.
+
+### 4b. Deploy the sync stream config
+
+```bash
+npm install -g @powersync/cli
+powersync login
+powersync link cloud --project-id=<your-project-id>
+powersync deploy sync-config
+```
+
+The config is at [powersync/sync-config.yaml](powersync/sync-config.yaml).
+
+---
+
+## 5. Build and run
+
+1. Select your target device in Xcode (real device recommended for AI features)
+2. **Product → Run** (⌘R)
+3. Sign up with an email — a `staff` row is created automatically for you
+4. An admin must assign you to a `park_id` and set your `rank` in Supabase before map data appears
+5. AI models download on first use (~1.2 GB for LLM, ~150 MB for Whisper)
+
+---
+
+## Swift Package Dependencies (Xcode SPM)
 
 | Package | URL | Version |
 |---------|-----|---------|
@@ -65,31 +181,7 @@ powersync/
 | TCA | `https://github.com/pointfreeco/swift-composable-architecture` | `>= 1.0.0` |
 | swift-cactus | `https://github.com/nicholasnlawson/swift-cactus` | `2.1.1` |
 
-### 2. Secrets
-
-Copy `_Secrets.template.swift` to `AskariAI/Managers/_Secrets.swift` and fill in:
-- `supabaseURL`
-- `supabaseAnonKey`
-- `powerSyncEndpoint`
-- `supabaseStorageBucket` (optional — disables media attachments if absent)
-
-### 3. Info.plist Permissions
-
-```xml
-<key>NSMicrophoneUsageDescription</key>
-<string>Used for voice incident logging in the field</string>
-```
-
-### 4. PowerSync Sync Config
-
-Deploy the sync stream config via the PowerSync CLI:
-
-```bash
-npm install -g powersync
-powersync login
-powersync link cloud --instance-id=69b5b2687c4f8b306a1b8255 --project-id=<project-id>
-powersync deploy sync-config
-```
+All packages are declared in `Package.swift` and resolve automatically in Xcode.
 
 ---
 
