@@ -58,8 +58,8 @@ struct AppFeature {
                 state.appPhase = phase
                 return .none
 
-            case .auth(.signInSucceeded(let staff)):
-                state.appPhase = .authenticated(role: staff.userRole)
+            case .auth(.signInSucceeded(_, let effectiveRole)):
+                state.appPhase = .authenticated(role: effectiveRole)
                 return .none
 
             case .auth(.signOutSucceeded):
