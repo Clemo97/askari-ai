@@ -44,10 +44,9 @@ final class SystemManager: @unchecked Sendable {
 
     private(set) var isSyncConnected = false
 
-    /// Active sync-stream subscriptions. All four streams are subscribed on connect;
-    /// the PowerSync service uses request.user_id() server-side to filter each stream,
-    /// so non-matching streams (e.g. a ranger subscribing to admin_map_features) complete
-    /// instantly with 0 rows rather than returning unauthorised data.
+    /// Active sync-stream subscription for the consolidated `migrated_to_streams` stream.
+    /// auto_subscribe: true on the server already begins syncing on connect; we subscribe
+    /// explicitly here only to call waitForFirstSync() before returning from connect().
     private var syncSubscriptions: [any SyncStreamSubscription] = []
 
     /// Shared instance used by AI tools and other non-TCA code.
@@ -71,23 +70,15 @@ final class SystemManager: @unchecked Sendable {
 
         try await db.connect(connector: connector)
 
-        // Subscribe to named sync streams. The server filters by request.user_id(),
-        // so only data the current user is authorised to see is returned.
-        // All four are subscribed up-front; non-matching role streams resolve immediately.
-        let globalSub     = try await db.syncStream(name: "global_reference",    params: nil).subscribe()
-        let rangerOwnSub  = try await db.syncStream(name: "ranger_own_features", params: nil).subscribe()
-        let rangerParkSub = try await db.syncStream(name: "ranger_park_data",    params: nil).subscribe()
-        let adminSub      = try await db.syncStream(name: "admin_map_features",  params: nil).subscribe()
-        syncSubscriptions = [globalSub, rangerOwnSub, rangerParkSub, adminSub]
+        // Subscribe to the single consolidated stream. The server resolves CTE parameters
+        // via auth.user_id() — ranger and admin data are filtered server-side automatically.
+        // auto_subscribe: true means sync begins immediately on connect; we subscribe
+        // explicitly only to get a handle for waitForFirstSync().
+        let sub = try await db.syncStream(name: "migrated_to_streams", params: nil).subscribe()
+        syncSubscriptions = [sub]
 
-        // Wait for all streams to complete initial sync in parallel.
-        // Park boundaries and spot types must be available before the map renders.
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            for sub in syncSubscriptions {
-                group.addTask { try await sub.waitForFirstSync() }
-            }
-            try await group.waitForAll()
-        }
+        // Block until initial sync completes so the map has park data before rendering.
+        try await sub.waitForFirstSync()
 
         // Set up attachment sync for incident media
         if let bucket = Secrets.supabaseStorageBucket {
