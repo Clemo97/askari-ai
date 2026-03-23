@@ -103,100 +103,53 @@ powersync deploy sync-config
 
 ## PowerSync Sync Streams
 
-Migrated from sync rules (`bucket_definitions`) to **sync streams** (`streams`). All four streams use `auto_subscribe: true` and filter server-side using `auth.user_id()` — no client-side parameters required.
+Migrated from sync rules (`bucket_definitions`) to a single consolidated **sync stream** (`migrated_to_streams`). CTE-style `with:` parameters resolve per-user via `auth.user_id()` — ranger and admin data are filtered server-side, no client-side parameters required.
 
 ```yaml
 config:
   edition: 3
 
 streams:
-  ranger_own_features:
+  migrated_to_streams:
     auto_subscribe: true
-    query: |
-      SELECT map_features.*
-      FROM map_features
-      JOIN staff ON map_features.created_by = staff.id
-      WHERE staff.user_id = auth.user_id()
-        AND staff.rank = 'ranger'
-        AND staff.is_active = true
-
-  ranger_park_data:
-    auto_subscribe: true
+    with:
+      ranger_own_features_param: >-
+        SELECT staff.id AS staff_id FROM staff
+        WHERE staff.user_id = auth.user_id()
+          AND staff.rank = 'ranger' AND staff.is_active = TRUE
+      ranger_park_data_param: >-
+        SELECT staff.park_id AS park_id FROM staff
+        WHERE staff.user_id = auth.user_id()
+          AND staff.rank = 'ranger' AND staff.is_active = TRUE
+      admin_map_features_param: >-
+        SELECT staff.park_id AS park_id FROM staff
+        WHERE staff.user_id = auth.user_id()
+          AND staff.rank = 'admin' AND staff.is_active = TRUE
     queries:
-      - |
-        SELECT parks.*
-        FROM parks
-        JOIN staff ON parks.id = staff.park_id
-        WHERE staff.user_id = auth.user_id()
-          AND staff.rank = 'ranger'
-          AND staff.is_active = true
-      - |
-        SELECT park_boundaries.*
-        FROM park_boundaries
-        JOIN staff ON park_boundaries.park_id = staff.park_id
-        WHERE staff.user_id = auth.user_id()
-          AND staff.rank = 'ranger'
-          AND staff.is_active = true
-      - |
-        SELECT s.*
-        FROM staff s
-        JOIN staff user_staff ON s.park_id = user_staff.park_id
-        WHERE user_staff.user_id = auth.user_id()
-          AND user_staff.rank = 'ranger'
-          AND user_staff.is_active = true
-          AND s.is_active = true
-
-  admin_map_features:
-    auto_subscribe: true
-    queries:
-      - |
-        SELECT map_features.*
-        FROM map_features
-        JOIN staff ON map_features.park_id = staff.park_id
-        WHERE staff.user_id = auth.user_id()
-          AND staff.rank = 'admin'
-          AND staff.is_active = true
-      - |
-        SELECT parks.*
-        FROM parks
-        JOIN staff ON parks.id = staff.park_id
-        WHERE staff.user_id = auth.user_id()
-          AND staff.rank = 'admin'
-          AND staff.is_active = true
-      - |
-        SELECT park_boundaries.*
-        FROM park_boundaries
-        JOIN staff ON park_boundaries.park_id = staff.park_id
-        WHERE staff.user_id = auth.user_id()
-          AND staff.rank = 'admin'
-          AND staff.is_active = true
-      - |
-        SELECT s.*
-        FROM staff s
-        JOIN staff user_staff ON s.park_id = user_staff.park_id
-        WHERE user_staff.user_id = auth.user_id()
-          AND user_staff.rank = 'admin'
-          AND user_staff.is_active = true
-          AND s.is_active = true
-
-  global_reference:
-    auto_subscribe: true
-    queries:
-      - SELECT * FROM spot_types WHERE is_active = true
+      # Ranger: own incidents
+      - "SELECT map_features.* FROM map_features, ranger_own_features_param AS bucket WHERE map_features.created_by = bucket.staff_id"
+      # Ranger: park context
+      - "SELECT parks.* FROM parks, ranger_park_data_param AS bucket WHERE parks.id = bucket.park_id"
+      - "SELECT park_boundaries.* FROM park_boundaries, ranger_park_data_param AS bucket WHERE park_boundaries.park_id = bucket.park_id"
+      - "SELECT staff.* FROM staff, ranger_park_data_param AS bucket WHERE staff.park_id = bucket.park_id AND staff.is_active = TRUE"
+      # Admin: all park map features + context
+      - "SELECT map_features.* FROM map_features, admin_map_features_param AS bucket WHERE map_features.park_id = bucket.park_id"
+      - "SELECT parks.* FROM parks, admin_map_features_param AS bucket WHERE parks.id = bucket.park_id"
+      - "SELECT park_boundaries.* FROM park_boundaries, admin_map_features_param AS bucket WHERE park_boundaries.park_id = bucket.park_id"
+      - "SELECT staff.* FROM staff, admin_map_features_param AS bucket WHERE staff.park_id = bucket.park_id AND staff.is_active = TRUE"
+      # Global reference (all users)
+      - SELECT * FROM spot_types WHERE spot_types.is_active = TRUE
       - SELECT * FROM mission_role_types
 ```
 
-On the client, `SystemManager.connect()` explicitly subscribes to all four streams and awaits their first sync in parallel:
+On the client, `SystemManager.connect()` subscribes to the single stream and awaits its first sync:
 
 ```swift
-let subs = try await withThrowingTaskGroup(of: (any SyncStreamSubscription).self) { ... }
-try await withThrowingTaskGroup(of: Void.self) { group in
-    for sub in syncSubscriptions { group.addTask { try await sub.waitForFirstSync() } }
-    try await group.waitForAll()
-}
+let sub = try await db.syncStream(name: "migrated_to_streams", params: nil).subscribe()
+try await sub.waitForFirstSync()
 ```
 
-Non-matching role streams (e.g. a ranger subscribing to `admin_map_features`) resolve immediately with 0 rows — no unauthorised data is returned.
+`auto_subscribe: true` means the server begins syncing immediately on connection — the explicit subscribe call is used only to obtain a handle for `waitForFirstSync()`, which blocks until the local SQLite database has received its initial data.
 
 ---
 
