@@ -109,362 +109,31 @@ You can find these values at:
 
 ## 3. Set up Supabase
 
-### 3a. Run the setup SQL
+The full database definition is split into focused files under `supabase/`:
 
-Open the **Supabase SQL Editor** (Dashboard → SQL Editor → New query), paste the entire block below, and click **Run**. This creates all tables, functions, triggers, and seeds reference data to match the current production schema.
+| File | Purpose |
+|------|---------|
+| [supabase/schema.dbml](supabase/schema.dbml) | Schema documentation — tables, PKs, FKs, checks (DBML format) |
+| [supabase/schema.sql](supabase/schema.sql) | `CREATE TABLE` statements + `spot_types` seed data |
+| [supabase/indexes.sql](supabase/indexes.sql) | Performance indexes |
+| [supabase/functions.sql](supabase/functions.sql) | Helper functions (`auth_staff_id`, `auth_staff_park_id`, `auth_staff_rank`, `trigger_set_updated_at`, `handle_new_user`) |
+| [supabase/triggers.sql](supabase/triggers.sql) | `updated_at` triggers + commented `on_auth_user_created` auth trigger |
+| [supabase/rls.sql](supabase/rls.sql) | RLS enables + all policies |
+| [supabase/powersync.sql](supabase/powersync.sql) | PowerSync scoping notes (not executed in DB) |
 
-```sql
--- ============================================================
--- Askari AI — Full Database Setup
--- Run this once in the Supabase SQL Editor on a fresh project.
--- ============================================================
+### 3a. Run the setup SQL in order
 
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+Open the **Supabase SQL Editor** (Dashboard → SQL Editor → New query) and run each file in the order listed. Each query window is a fresh paste — run them one at a time.
 
--- ============================================================
--- SPOT TYPES (incident categories — global reference data)
--- ============================================================
-CREATE TABLE spot_types (
-    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    code_name        TEXT NOT NULL UNIQUE,
-    display_name     TEXT NOT NULL,
-    color_hex        TEXT NOT NULL DEFAULT '#FF6B00',
-    is_active        BOOLEAN NOT NULL DEFAULT TRUE,
-    sort_order       INTEGER NOT NULL DEFAULT 0,
-    description      TEXT,
-    severity_default TEXT NOT NULL DEFAULT 'medium'
-                         CHECK (severity_default IN ('low','medium','high','critical')),
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+| Step | File | Action |
+|------|------|--------|
+| 1 | [supabase/schema.sql](supabase/schema.sql) | Creates all tables; seeds 14 `spot_types` rows |
+| 2 | [supabase/indexes.sql](supabase/indexes.sql) | Adds performance indexes |
+| 3 | [supabase/functions.sql](supabase/functions.sql) | Creates helper functions + `handle_new_user` |
+| 4 | [supabase/triggers.sql](supabase/triggers.sql) | Attaches `updated_at` triggers; see note for auth trigger |
+| 5 | [supabase/rls.sql](supabase/rls.sql) | Enables RLS and applies all policies |
 
-INSERT INTO spot_types (code_name, display_name, color_hex, sort_order, severity_default) VALUES
-    ('snare',              'Wire Snare',          '#FF4444',  1, 'high'),
-    ('ditch_trap',         'Ditch Trap',           '#FF6600',  2, 'high'),
-    ('poacher_camp',       'Poacher Camp',         '#CC0000',  3, 'critical'),
-    ('spent_cartridge',    'Spent Cartridge',      '#FF8800',  4, 'medium'),
-    ('arrest',             'Arrest',               '#00AA44',  5, 'high'),
-    ('carcass',            'Animal Carcass',       '#990000',  6, 'critical'),
-    ('poison',             'Poison/Bait',          '#AA00AA',  7, 'critical'),
-    ('charcoal_kiln',      'Charcoal Kiln',        '#555555',  8, 'medium'),
-    ('logging_site',       'Illegal Logging',      '#886600',  9, 'high'),
-    ('injured_animal',     'Injured Animal',       '#FF9900', 10, 'medium'),
-    ('track_footprint',    'Human Tracks',         '#AAAAAA', 11, 'low'),
-    ('vandalized_fence',   'Vandalized Fence',     '#FF6644', 12, 'medium'),
-    ('suspicious_vehicle', 'Suspicious Vehicle',   '#FF3300', 13, 'high'),
-    ('campfire',           'Illegal Campfire',     '#FF7700', 14, 'medium');
-
--- ============================================================
--- STAFF (linked to Supabase Auth users)
--- ============================================================
-CREATE TABLE staff (
-    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    email        TEXT NOT NULL UNIQUE,
-    staff_number TEXT UNIQUE,
-    first_name   TEXT NOT NULL,
-    last_name    TEXT NOT NULL,
-    rank         TEXT NOT NULL DEFAULT 'ranger',
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    user_id      UUID REFERENCES auth.users(id) ON DELETE SET NULL,
-    photo_url    TEXT
-);
-
-CREATE INDEX idx_staff_user_id ON staff(user_id);
-CREATE INDEX idx_staff_rank    ON staff(rank);
-
--- ============================================================
--- PARK BOUNDARIES
--- ============================================================
-CREATE TABLE park_boundaries (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    park_name   TEXT NOT NULL,
-    country     TEXT NOT NULL,
-    coordinates JSONB NOT NULL,   -- GeoJSON Polygon/MultiPolygon
-    created_at  TIMESTAMPTZ DEFAULT NOW(),
-    updated_at  TIMESTAMPTZ DEFAULT NOW()
-);
-
--- ============================================================
--- PARK BLOCKS (patrol zones)
--- ============================================================
-CREATE TABLE park_blocks (
-    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    block_name     VARCHAR NOT NULL,
-    coordinates    TEXT NOT NULL,         -- WKT or serialized polygon
-    threshold      NUMERIC NOT NULL DEFAULT 80.0,
-    visibility     NUMERIC NOT NULL DEFAULT 50.0,
-    rate_of_decay  NUMERIC NOT NULL DEFAULT 30.0,
-    last_patrolled TIMESTAMPTZ,
-    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- ============================================================
--- MISSION ROLE TYPES
--- ============================================================
-CREATE TABLE mission_role_types (
-    id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    role_name TEXT NOT NULL,
-    user_id   UUID REFERENCES auth.users(id) ON DELETE SET NULL
-);
-
--- ============================================================
--- MISSIONS
--- ============================================================
-CREATE TABLE missions (
-    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name                    TEXT NOT NULL,
-    objectives              TEXT NOT NULL DEFAULT '',
-    start_date              TIMESTAMPTZ NOT NULL,
-    end_date                TIMESTAMPTZ NOT NULL,
-    patrol_type             TEXT NOT NULL DEFAULT 'Local',
-    route_points            JSONB NOT NULL DEFAULT '[]',
-    staff_ids               UUID[] NOT NULL DEFAULT '{}',
-    leader_id               UUID,
-    instruction_video_url   TEXT,
-    created_at              TIMESTAMPTZ DEFAULT NOW(),
-    user_id                 UUID REFERENCES auth.users(id) ON DELETE SET NULL,
-    status                  TEXT DEFAULT 'future',
-    patrol_actions          TEXT,
-    mission_state           TEXT DEFAULT 'not_started'
-                                COMMENT ON COLUMN missions.mission_state IS 'Current execution state: not_started, active, or paused',
-    total_active_time       DOUBLE PRECISION,   -- total seconds in active state
-    last_state_change       TIMESTAMPTZ,        -- timestamp of last state change
-    selected_block_ids      JSONB NOT NULL DEFAULT '[]',
-    updated_at              TIMESTAMPTZ DEFAULT NOW(),
-    current_transport_mode  TEXT,
-    transport_mode_history  TEXT
-);
-
-CREATE INDEX idx_missions_status     ON missions(status);
-CREATE INDEX idx_missions_start_date ON missions(start_date);
-CREATE INDEX idx_missions_leader_id  ON missions(leader_id);
-
--- ============================================================
--- STAFF ↔ MISSION
--- ============================================================
-CREATE TABLE staff_mission (
-    staff_id           UUID NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
-    mission_id         UUID NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
-    staff_mission_role UUID REFERENCES mission_role_types(id) ON DELETE SET NULL,
-    user_id            UUID REFERENCES auth.users(id) ON DELETE SET NULL,
-    PRIMARY KEY (staff_id, mission_id)
-);
-
--- ============================================================
--- MAP FEATURES (incidents logged during patrol)
--- ============================================================
-CREATE TABLE map_features (
-    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name                 TEXT NOT NULL,
-    description          TEXT,
-    geometry             JSONB NOT NULL,   -- GeoJSON Point
-    created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    created_by           UUID REFERENCES auth.users(id) ON DELETE SET NULL,
-    media_url            TEXT,             -- JSON array of attachment IDs stored as text
-    decay_rate           DOUBLE PRECISION,
-    threshold            DOUBLE PRECISION,
-    buffer_distance      DOUBLE PRECISION,
-    last_patrolled       TIMESTAMPTZ,
-    mission_id           UUID REFERENCES missions(id) ON DELETE SET NULL,
-    captured_by_staff_id UUID REFERENCES staff(id) ON DELETE SET NULL,
-    updated_at           TIMESTAMPTZ,
-    local_media_identifiers TEXT[],        -- PhotoKit PHAsset localIdentifiers
-    spot_type_id         UUID REFERENCES spot_types(id) ON DELETE SET NULL,
-    is_resolved          BOOLEAN NOT NULL DEFAULT FALSE,
-    resolved_at          TIMESTAMPTZ,
-    resolved_by          UUID,
-    severity             TEXT NOT NULL DEFAULT 'medium'
-                             CHECK (severity IN ('low','medium','high','critical'))
-);
-
-CREATE INDEX idx_map_features_spot_type   ON map_features(spot_type_id);
-CREATE INDEX idx_map_features_mission_id  ON map_features(mission_id);
-CREATE INDEX idx_map_features_created_at  ON map_features(created_at DESC);
-CREATE INDEX idx_map_features_severity    ON map_features(severity);
-
--- ============================================================
--- MAP FEATURES ↔ MISSIONS (many-to-many join)
--- ============================================================
-CREATE TABLE map_features_missions (
-    id             UUID DEFAULT gen_random_uuid(),
-    map_feature_id UUID NOT NULL REFERENCES map_features(id) ON DELETE CASCADE,
-    mission_id     UUID NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
-    PRIMARY KEY (map_feature_id, mission_id)
-);
-
--- ============================================================
--- MISSION TRACK (patrol coverage + route geometry per mission)
--- ============================================================
-CREATE TABLE mission_track (
-    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    mission_id           UUID UNIQUE REFERENCES missions(id) ON DELETE CASCADE,
-    coverage_geometry    JSONB,            -- patrol coverage area polygon
-    path_geometry        JSONB,            -- route with vehicle/foot segments
-    distance_traveled_km DOUBLE PRECISION DEFAULT 0.0,
-    created_at           TIMESTAMPTZ DEFAULT NOW()
-) COMMENT ON TABLE mission_track IS 'Stores mission tracking data: coverage_geometry (patrol coverage area) and path_geometry (route with vehicle/foot segments)';
-
--- ============================================================
--- MISSION SCORES
--- ============================================================
-CREATE TABLE mission_scores (
-    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    mission_id           UUID UNIQUE NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
-    distance_traveled_km REAL NOT NULL DEFAULT 0.0,
-    buffer_points        REAL NOT NULL DEFAULT 0.0,
-    mission_completed    BOOLEAN NOT NULL DEFAULT FALSE,
-    completed_at         TIMESTAMPTZ,
-    created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
-) COMMENT ON TABLE mission_scores IS 'Mission-level aggregated scores (one record per mission)';
-
--- ============================================================
--- GREEN TRACK (patrol route buffer polygons)
--- ============================================================
-CREATE TABLE green_track (
-    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    geometry             JSONB NOT NULL
-                             CHECK ((geometry ->> 'type') = ANY (ARRAY['Polygon','MultiPolygon'])),
-    mission_id           UUID NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
-    created_at           TIMESTAMPTZ DEFAULT NOW(),
-    distance_traveled_km DOUBLE PRECISION DEFAULT 0.0
-);
-
--- ============================================================
--- TERRAINS
--- ============================================================
-CREATE TABLE terrains (
-    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name         TEXT NOT NULL,
-    geometry     JSONB NOT NULL,
-    terrain_type TEXT NOT NULL
-                     CHECK (terrain_type IN ('forest','savanna','wetland','river','mountain','grassland')),
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- ============================================================
--- FILTER PRESETS (saved map filter configs)
--- ============================================================
-CREATE TABLE filter_presets (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name            TEXT NOT NULL,
-    description     TEXT,
-    spot_types      TEXT[] NOT NULL,
-    is_system_preset BOOLEAN DEFAULT FALSE,
-    created_by      UUID REFERENCES staff(id) ON DELETE SET NULL,
-    days_back       INTEGER NOT NULL,
-    created_at      TIMESTAMPTZ DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ DEFAULT NOW()
-);
-
--- ============================================================
--- ATTACHMENTS (PowerSync media queue)
--- ============================================================
-CREATE TABLE attachments (
-    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    filename   TEXT NOT NULL,
-    media_type TEXT,
-    state      INTEGER NOT NULL DEFAULT 0,
-    local_uri  TEXT,
-    remote_uri TEXT,
-    size       INTEGER,
-    timestamp  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- ============================================================
--- MISSION STATUS LOGS (automated scheduler audit trail)
--- ============================================================
-CREATE TABLE mission_status_logs (
-    id               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    executed_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    missions_updated INTEGER NOT NULL DEFAULT 0
-);
-
--- ============================================================
--- FUNCTIONS
--- ============================================================
-
--- Auto-populate user_id on staff insert by matching email to auth.users
-CREATE OR REPLACE FUNCTION populate_user_id()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.user_id := (SELECT id FROM auth.users WHERE email = NEW.email);
-    IF NEW.user_id IS NULL THEN
-        RAISE EXCEPTION 'No auth user found with email %', NEW.email;
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- Generic updated_at updater
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- When a mission_score is marked completed, flip the mission status to 'past'
-CREATE OR REPLACE FUNCTION auto_update_mission_status_on_completion()
-RETURNS TRIGGER AS $$
-BEGIN
-    IF NEW.mission_completed IS TRUE THEN
-        UPDATE public.missions
-        SET status = 'past'
-        WHERE id = NEW.mission_id
-          AND status IS DISTINCT FROM 'past';
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- ============================================================
--- TRIGGERS
--- ============================================================
-
--- Populate user_id when a staff row is inserted
-CREATE TRIGGER set_user_id
-    BEFORE INSERT ON staff
-    FOR EACH ROW EXECUTE FUNCTION populate_user_id();
-
--- Keep mission_scores.updated_at current
-CREATE TRIGGER update_mission_scores_updated_at
-    BEFORE UPDATE ON mission_scores
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
--- Auto-close mission when scores mark it complete
-CREATE TRIGGER trigger_update_mission_status_on_completion
-    AFTER INSERT OR UPDATE ON mission_scores
-    FOR EACH ROW EXECUTE FUNCTION auto_update_mission_status_on_completion();
-
--- ============================================================
--- ROW LEVEL SECURITY
--- Enable RLS on tables that need per-user access control.
--- The sync stream handles data scoping for PowerSync;
--- RLS here protects direct Supabase API access.
--- ============================================================
-ALTER TABLE spot_types         ENABLE ROW LEVEL SECURITY;
-ALTER TABLE filter_presets     ENABLE ROW LEVEL SECURITY;
-ALTER TABLE terrains           ENABLE ROW LEVEL SECURITY;
-ALTER TABLE attachments        ENABLE ROW LEVEL SECURITY;
-ALTER TABLE mission_status_logs ENABLE ROW LEVEL SECURITY;
-
--- All authenticated users can read spot_types
-CREATE POLICY "spot_types: authenticated read"
-    ON spot_types FOR SELECT USING (auth.role() = 'authenticated');
-
--- Staff can read/write their own filter presets; system presets are readable by all
-CREATE POLICY "filter_presets: read own + system"
-    ON filter_presets FOR SELECT
-    USING (is_system_preset = TRUE OR created_by = (SELECT id FROM staff WHERE user_id = auth.uid() LIMIT 1));
-
-CREATE POLICY "filter_presets: write own"
-    ON filter_presets FOR ALL
-    USING (created_by = (SELECT id FROM staff WHERE user_id = auth.uid() LIMIT 1));
-```
-
-> **Note:** The `populate_user_id` trigger requires that you create the Supabase Auth user **before** inserting the corresponding `staff` row. The easiest flow is to sign up via the app first, then update the `staff` row's `rank` in the SQL editor.
+> **Auth trigger (step 4):** `triggers.sql` includes a commented-out `CREATE TRIGGER on_auth_user_created` on the `auth.users` table. Uncomment and run it in the Supabase SQL Editor (which executes as superuser). This enables automatic `staff` row creation on signup.
 
 ### 3b. Create a Storage bucket (optional — for media attachments)
 
@@ -475,13 +144,19 @@ CREATE POLICY "filter_presets: write own"
 
 ### 3c. Set up your first admin/ranger
 
-Sign up via the app (this creates an `auth.users` entry). Then set your rank and link to a park boundary in the SQL editor:
+Sign up via the app — `handle_new_user` automatically creates a `staff` row linked to the first park in the database. To promote an account to admin:
 
 ```sql
-UPDATE staff SET rank = 'admin' WHERE email = 'you@example.com';
+UPDATE public.staff SET rank = 'admin' WHERE email = 'you@example.com';
 ```
 
-Rangers are scoped to data by the PowerSync sync stream — there is no `park_id` column on `staff` in the current schema. Boundary data is stored in `park_boundaries` and the app loads whichever boundary record exists.
+To assign a ranger to a specific park (if multiple parks exist):
+
+```sql
+UPDATE public.staff
+SET park_id = (SELECT id FROM public.parks WHERE name = 'Nairobi National Park')
+WHERE email = 'ranger@example.com';
+```
 
 ---
 
@@ -508,8 +183,8 @@ The config is at [powersync/sync-config.yaml](powersync/sync-config.yaml).
 
 1. Select your target device in Xcode (real device recommended for AI features)
 2. **Product → Run** (⌘R)
-3. Sign up with an email — a `staff` row is created automatically for you
-4. An admin must assign you to a `park_id` and set your `rank` in Supabase before map data appears
+3. Sign up with an email — `handle_new_user` creates a `staff` row and assigns the default park automatically
+4. To promote yourself to admin, run `UPDATE public.staff SET rank = 'admin' WHERE email = 'you@example.com';` in the SQL Editor
 5. AI models download on first use (~1.2 GB for LLM, ~150 MB for Whisper)
 
 ---
@@ -531,7 +206,7 @@ All packages are declared in `Package.swift` and resolve automatically in Xcode.
 
 - **Supabase Project:** *(set `supabaseURL` and `supabaseAnonKey` in `_Secrets.swift`)*
 - **PowerSync Instance:** *(set `powerSyncEndpoint` in `_Secrets.swift`)*
-- Schema: see `supabase/migrations/`
+- Schema: see [`supabase/schema.dbml`](supabase/schema.dbml)
 
 ---
 
