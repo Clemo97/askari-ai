@@ -3,81 +3,42 @@
 # PowerSync Sync Streams — edition 3
 # Instance: https://69b5b2687c4f8b306a1b8255.powersync.journeyapps.com
 #
-# Migrated from bucket_definitions (sync rules) to stream_definitions (sync streams).
-# Clients subscribe explicitly via db.syncStream(name:).subscribe().
-# All streams use request.user_id() server-side — no params needed from the client.
+# Single consolidated stream migrated from the original four bucket_definitions.
+# CTE-style `with:` parameters resolve per-user via auth.user_id().
+# auto_subscribe: true — the server subscribes all authenticated users automatically.
 
 config:
   edition: 3
 
-stream_definitions:
-
-  # ── Global reference data (all users, auto-subscribed) ────────────────────
-  # spot_types and mission_role_types are small and needed by all roles before
-  # any screen renders, so auto_subscribe: true avoids a redundant client call.
-  global_reference:
+streams:
+  migrated_to_streams:
     auto_subscribe: true
-    data:
-      - SELECT * FROM spot_types WHERE spot_types.is_active = true
+    with:
+      ranger_own_features_param: >-
+        SELECT staff.id AS staff_id FROM staff
+        WHERE staff.user_id = auth.user_id()
+          AND staff.rank = 'ranger' AND staff.is_active = TRUE
+      ranger_park_data_param: >-
+        SELECT staff.park_id AS park_id FROM staff
+        WHERE staff.user_id = auth.user_id()
+          AND staff.rank = 'ranger' AND staff.is_active = TRUE
+      admin_map_features_param: >-
+        SELECT staff.park_id AS park_id FROM staff
+        WHERE staff.user_id = auth.user_id()
+          AND staff.rank = 'admin' AND staff.is_active = TRUE
+    queries:
+      # Ranger: own incidents
+      - "SELECT map_features.* FROM map_features, ranger_own_features_param AS bucket WHERE map_features.created_by = bucket.staff_id"
+      # Ranger: park context
+      - "SELECT parks.* FROM parks, ranger_park_data_param AS bucket WHERE parks.id = bucket.park_id"
+      - "SELECT park_boundaries.* FROM park_boundaries, ranger_park_data_param AS bucket WHERE park_boundaries.park_id = bucket.park_id"
+      - "SELECT staff.* FROM staff, ranger_park_data_param AS bucket WHERE staff.park_id = bucket.park_id AND staff.is_active = TRUE"
+      # Admin: all park map features + context
+      - "SELECT map_features.* FROM map_features, admin_map_features_param AS bucket WHERE map_features.park_id = bucket.park_id"
+      - "SELECT parks.* FROM parks, admin_map_features_param AS bucket WHERE parks.id = bucket.park_id"
+      - "SELECT park_boundaries.* FROM park_boundaries, admin_map_features_param AS bucket WHERE park_boundaries.park_id = bucket.park_id"
+      - "SELECT staff.* FROM staff, admin_map_features_param AS bucket WHERE staff.park_id = bucket.park_id AND staff.is_active = TRUE"
+      # Global reference (all users)
+      - SELECT * FROM spot_types WHERE spot_types.is_active = TRUE
       - SELECT * FROM mission_role_types
-
-  # ── Rangers: own incidents only ──────────────────────────────────────────
-  ranger_own_features:
-    data:
-      - SELECT * FROM map_features
-        WHERE map_features.created_by = (
-          SELECT id FROM staff
-          WHERE user_id = request.user_id()
-            AND rank = 'ranger' AND is_active = true
-        )
-
-  # ── Rangers: park context (park row, boundary, colleagues) ───────────────
-  ranger_park_data:
-    data:
-      - SELECT * FROM parks
-        WHERE parks.id = (
-          SELECT park_id FROM staff
-          WHERE user_id = request.user_id()
-            AND rank = 'ranger' AND is_active = true
-        )
-      - SELECT * FROM park_boundaries
-        WHERE park_boundaries.park_id = (
-          SELECT park_id FROM staff
-          WHERE user_id = request.user_id()
-            AND rank = 'ranger' AND is_active = true
-        )
-      - SELECT * FROM staff
-        WHERE staff.park_id = (
-          SELECT park_id FROM staff s2
-          WHERE s2.user_id = request.user_id()
-            AND s2.rank = 'ranger' AND s2.is_active = true
-        ) AND staff.is_active = true
-
-  # ── Admins: all map features + park context ───────────────────────────────
-  admin_map_features:
-    data:
-      - SELECT * FROM map_features
-        WHERE map_features.park_id = (
-          SELECT park_id FROM staff
-          WHERE user_id = request.user_id()
-            AND rank = 'admin' AND is_active = true
-        )
-      - SELECT * FROM parks
-        WHERE parks.id = (
-          SELECT park_id FROM staff
-          WHERE user_id = request.user_id()
-            AND rank = 'admin' AND is_active = true
-        )
-      - SELECT * FROM park_boundaries
-        WHERE park_boundaries.park_id = (
-          SELECT park_id FROM staff
-          WHERE user_id = request.user_id()
-            AND rank = 'admin' AND is_active = true
-        )
-      - SELECT * FROM staff
-        WHERE staff.park_id = (
-          SELECT park_id FROM staff s2
-          WHERE s2.user_id = request.user_id()
-            AND s2.rank = 'admin' AND s2.is_active = true
-        ) AND staff.is_active = true
 
