@@ -1,59 +1,83 @@
 # powersync/sync-config.yaml
 # Askari AI — Ranger Intelligence Copilot
-# PowerSync Sync Rules — edition 3
+# PowerSync Sync Streams — edition 3
 # Instance: https://69b5b2687c4f8b306a1b8255.powersync.journeyapps.com
+#
+# Migrated from bucket_definitions (sync rules) to stream_definitions (sync streams).
+# Clients subscribe explicitly via db.syncStream(name:).subscribe().
+# All streams use request.user_id() server-side — no params needed from the client.
 
 config:
   edition: 3
 
-bucket_definitions:
+stream_definitions:
 
-  # ── Rangers: own incidents only ──────────────────────────────────────────
-  ranger_own_features:
-    parameters: |
-      SELECT
-        staff.id as staff_id
-      FROM staff
-      WHERE staff.user_id = request.user_id()
-        AND staff.rank = 'ranger'
-        AND staff.is_active = true
-    data:
-      - SELECT * FROM map_features WHERE map_features.created_by = bucket.staff_id
-
-  # ── Rangers: park context (park row, boundary, colleagues) ───────────────
-  ranger_park_data:
-    parameters: |
-      SELECT
-        staff.park_id as park_id
-      FROM staff
-      WHERE staff.user_id = request.user_id()
-        AND staff.rank = 'ranger'
-        AND staff.is_active = true
-    data:
-      - SELECT * FROM parks WHERE parks.id = bucket.park_id
-      - SELECT * FROM park_boundaries WHERE park_boundaries.park_id = bucket.park_id
-      - SELECT * FROM staff WHERE staff.park_id = bucket.park_id AND staff.is_active = true
-
-  # ── Admins: all map features + park context ───────────────────────────────
-  admin_map_features:
-    parameters: |
-      SELECT
-        staff.park_id as park_id
-      FROM staff
-      WHERE staff.user_id = request.user_id()
-        AND staff.rank = 'admin'
-        AND staff.is_active = true
-    data:
-      - SELECT * FROM map_features WHERE map_features.park_id = bucket.park_id
-      - SELECT * FROM parks WHERE parks.id = bucket.park_id
-      - SELECT * FROM park_boundaries WHERE park_boundaries.park_id = bucket.park_id
-      - SELECT * FROM staff WHERE staff.park_id = bucket.park_id AND staff.is_active = true
-
-  # ── Global reference data (all users) ────────────────────────────────────
+  # ── Global reference data (all users, auto-subscribed) ────────────────────
+  # spot_types and mission_role_types are small and needed by all roles before
+  # any screen renders, so auto_subscribe: true avoids a redundant client call.
   global_reference:
-    parameters:
-      - SELECT 1 AS dummy
+    auto_subscribe: true
     data:
       - SELECT * FROM spot_types WHERE spot_types.is_active = true
       - SELECT * FROM mission_role_types
+
+  # ── Rangers: own incidents only ──────────────────────────────────────────
+  ranger_own_features:
+    data:
+      - SELECT * FROM map_features
+        WHERE map_features.created_by = (
+          SELECT id FROM staff
+          WHERE user_id = request.user_id()
+            AND rank = 'ranger' AND is_active = true
+        )
+
+  # ── Rangers: park context (park row, boundary, colleagues) ───────────────
+  ranger_park_data:
+    data:
+      - SELECT * FROM parks
+        WHERE parks.id = (
+          SELECT park_id FROM staff
+          WHERE user_id = request.user_id()
+            AND rank = 'ranger' AND is_active = true
+        )
+      - SELECT * FROM park_boundaries
+        WHERE park_boundaries.park_id = (
+          SELECT park_id FROM staff
+          WHERE user_id = request.user_id()
+            AND rank = 'ranger' AND is_active = true
+        )
+      - SELECT * FROM staff
+        WHERE staff.park_id = (
+          SELECT park_id FROM staff s2
+          WHERE s2.user_id = request.user_id()
+            AND s2.rank = 'ranger' AND s2.is_active = true
+        ) AND staff.is_active = true
+
+  # ── Admins: all map features + park context ───────────────────────────────
+  admin_map_features:
+    data:
+      - SELECT * FROM map_features
+        WHERE map_features.park_id = (
+          SELECT park_id FROM staff
+          WHERE user_id = request.user_id()
+            AND rank = 'admin' AND is_active = true
+        )
+      - SELECT * FROM parks
+        WHERE parks.id = (
+          SELECT park_id FROM staff
+          WHERE user_id = request.user_id()
+            AND rank = 'admin' AND is_active = true
+        )
+      - SELECT * FROM park_boundaries
+        WHERE park_boundaries.park_id = (
+          SELECT park_id FROM staff
+          WHERE user_id = request.user_id()
+            AND rank = 'admin' AND is_active = true
+        )
+      - SELECT * FROM staff
+        WHERE staff.park_id = (
+          SELECT park_id FROM staff s2
+          WHERE s2.user_id = request.user_id()
+            AND s2.rank = 'admin' AND s2.is_active = true
+        ) AND staff.is_active = true
 

@@ -37,9 +37,9 @@ final class AIManager {
             rangerSystemPrompt
         }
 
-        // STT — NPU-accelerated Whisper for field transcription
+        // STT — Whisper for field transcription
         let whisperURL = try await CactusModelsDirectory.shared.modelURL(
-            for: .whisperSmall(pro: .apple)
+            for: .whisperSmall()
         )
         sttSession = try CactusSTTSession(from: whisperURL)
 
@@ -58,6 +58,20 @@ final class AIManager {
     // deterministic). The CactusFunction tool implementations still execute the
     // actual SQL queries — we just call them from Swift rather than via the LLM.
     // The downloaded model remains available for RangerCopilotFeature.
+
+    /// Returns true if the Whisper model is already on disk. Synchronous — no download triggered.
+    func isSTTModelDownloaded() -> Bool {
+        CactusModelsDirectory.shared.storedModelURL(for: .whisperSmall()) != nil
+    }
+
+    /// Ensures the Whisper model file is present on disk (downloads if needed).
+    /// Does NOT create a CactusSTTSession — the session is built just-in-time inside
+    /// stopNoteRecording(), after AVAudioRecorder has fully stopped. Creating a
+    /// CactusSTTSession before recording starts activates Cactus audio infrastructure
+    /// that conflicts with AVAudioRecorder, producing a corrupt/empty WAV file.
+    func loadSTTIfNeeded() async throws {
+        _ = try await CactusModelsDirectory.shared.modelURL(for: .whisperSmall())
+    }
 
     /// Warms the model cache so the binary is ready for RangerCopilot.
     /// No-op if already downloaded.
@@ -186,6 +200,78 @@ final class AIManager {
         return completion.output
     }
 
+    // MARK: - Note Dictation (AVAudioRecorder → 16 kHz mono WAV → Whisper)
+    // AVAudioEngine conflicts with CactusSTTSession's internal RealtimeMessenger —
+    // starting a second AVAudioEngine triggers its queue assertions and crashes.
+    // AVAudioRecorder is a black-box file writer with no exposed audio callbacks,
+    // so it never touches Cactus internals.
+    //
+    // Previous "Missing fmt chunk" root causes (now fixed):
+    //   • AVSampleRateKey must be Double (16000.0), not Int (16_000)
+    //   • prepareToRecord() must be called before record() to write the RIFF header
+
+    private var noteRecorder: AVAudioRecorder?
+    private var noteRecordingURL: URL?
+
+    func startNoteRecording() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("askari_note_dictation.wav")
+        noteRecordingURL = url
+
+        let settings: [String: Any] = [
+            AVFormatIDKey:              kAudioFormatLinearPCM, // UInt32
+            AVSampleRateKey:            16000.0,               // Double ← was Int, caused missing fmt chunk
+            AVNumberOfChannelsKey:      1,                     // Int
+            AVLinearPCMBitDepthKey:     16,                    // Int
+            AVLinearPCMIsFloatKey:      false,                 // Bool
+            AVLinearPCMIsBigEndianKey:  false,                 // Bool
+            AVLinearPCMIsNonInterleaved: false                 // Bool
+        ]
+
+        try AVAudioSession.sharedInstance().setCategory(.record, mode: .default)
+        try AVAudioSession.sharedInstance().setActive(true)
+
+        let recorder = try AVAudioRecorder(url: url, settings: settings)
+        // prepareToRecord() creates and validates the RIFF/WAV file header up front.
+        // Without it, record() can produce an empty or corrupt header on some devices.
+        guard recorder.prepareToRecord() else {
+            throw NSError(domain: "AIManager", code: 3,
+                          userInfo: [NSLocalizedDescriptionKey: "AVAudioRecorder failed to prepare"])
+        }
+        recorder.record()
+        noteRecorder = recorder
+    }
+
+    func stopNoteRecording() async -> String {
+        noteRecorder?.stop()
+        noteRecorder = nil
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+
+        guard let recordingURL = noteRecordingURL else { return "" }
+        noteRecordingURL = nil
+
+        // Build the session HERE — after the recorder has stopped and the audio session
+        // is deactivated — so Cactus audio setup never overlaps with AVAudioRecorder.
+        guard let modelURL = CactusModelsDirectory.shared.storedModelURL(for: .whisperSmall()),
+              let stt = try? CactusSTTSession(from: modelURL) else {
+            try? FileManager.default.removeItem(at: recordingURL)
+            return ""
+        }
+
+        do {
+            let request = CactusTranscription.Request(
+                prompt: .whisper(language: .english, includeTimestamps: false),
+                content: .audio(recordingURL)
+            )
+            let result = try await stt.transcribe(request: request)
+            try? FileManager.default.removeItem(at: recordingURL)
+            return result.content.response.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            try? FileManager.default.removeItem(at: recordingURL)
+            return ""
+        }
+    }
+
     // MARK: - Voice Recording
 
     private var voiceChunks: [AVAudioPCMBuffer] = []
@@ -196,7 +282,7 @@ final class AIManager {
         partialCallback = onPartial
 
         let whisperURL = try? await CactusModelsDirectory.shared.modelURL(
-            for: .whisperSmall(pro: .apple)
+            for: .whisperSmall()
         )
         guard let whisperURL else { return }
 

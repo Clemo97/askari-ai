@@ -23,6 +23,18 @@ struct LogIncidentFeature {
         var showingMediaPicker = false
         var imagePickerSourceType: UIImagePickerController.SourceType = .camera
 
+        // Voice notes
+        var sttModelAvailable: Bool = false
+        var noteVoiceState: NoteVoiceState = .idle
+        var noteTranscriptionPreview: String = ""
+
+        enum NoteVoiceState: Equatable {
+            case idle
+            case loadingSTT   // downloading whisper model
+            case recording
+            case transcribing // final STT pass after mic stop
+        }
+
         // CLLocationCoordinate2D doesn't conform to Equatable
         static func == (lhs: State, rhs: State) -> Bool {
             lhs.coordinate.latitude == rhs.coordinate.latitude &&
@@ -34,7 +46,10 @@ struct LogIncidentFeature {
             lhs.isSaving == rhs.isSaving &&
             lhs.errorMessage == rhs.errorMessage &&
             lhs.mediaItems == rhs.mediaItems &&
-            lhs.showingMediaPicker == rhs.showingMediaPicker
+            lhs.showingMediaPicker == rhs.showingMediaPicker &&
+            lhs.noteVoiceState == rhs.noteVoiceState &&
+            lhs.noteTranscriptionPreview == rhs.noteTranscriptionPreview &&
+            lhs.sttModelAvailable == rhs.sttModelAvailable
         }
     }
 
@@ -51,6 +66,12 @@ struct LogIncidentFeature {
         case saved
         case cancel
         case setError(String?)
+        // Voice notes
+        case noteMicTapped
+        case noteSTTReady
+        case sttModelChecked(Bool)
+        case noteTranscriptionUpdated(String)
+        case noteVoiceTranscribed(String)
     }
 
     var body: some ReducerOf<Self> {
@@ -59,6 +80,9 @@ struct LogIncidentFeature {
             switch action {
             case .onAppear:
                 return .run { send in
+                    // Synchronous disk check — no network, no delay.
+                    let available = await AIManager.shared.isSTTModelDownloaded()
+                    await send(.sttModelChecked(available))
                     let types = try await systemManager.db.getAll(
                         sql: "SELECT * FROM spot_types WHERE is_active = 1 ORDER BY sort_order",
                         parameters: [],
@@ -223,6 +247,57 @@ struct LogIncidentFeature {
                 state.isSaving = false
                 return .none
 
+            // MARK: Voice Notes
+
+            case .noteSTTReady:
+                state.sttModelAvailable = true  // model is now on disk
+                state.noteVoiceState = .recording
+                state.noteTranscriptionPreview = ""
+                return .run { send in
+                    do {
+                        try await AIManager.shared.startNoteRecording()
+                    } catch {
+                        // Recording failed to start — reset silently
+                        await send(.noteVoiceTranscribed(""))
+                    }
+                }
+
+            case .noteMicTapped:
+                switch state.noteVoiceState {
+                case .idle:
+                    state.noteVoiceState = .loadingSTT
+                    return .run { send in
+                        try? await AIManager.shared.loadSTTIfNeeded()
+                        await send(.noteSTTReady)
+                    }
+                case .recording:
+                    state.noteVoiceState = .transcribing
+                    state.noteTranscriptionPreview = ""
+                    return .run { send in
+                        let text = await AIManager.shared.stopNoteRecording()
+                        await send(.noteVoiceTranscribed(text))
+                    }
+                default:
+                    return .none
+                }
+
+            case .sttModelChecked(let available):
+                state.sttModelAvailable = available
+                return .none
+
+            case .noteTranscriptionUpdated(let partial):
+                state.noteTranscriptionPreview = partial
+                return .none
+
+            case .noteVoiceTranscribed(let text):
+                if !text.isEmpty {
+                    let separator = state.description.isEmpty ? "" : " "
+                    state.description += separator + text
+                }
+                state.noteVoiceState = .idle
+                state.noteTranscriptionPreview = ""
+                return .none
+
             case .cancel, .binding:
                 return .none
             }
@@ -306,6 +381,56 @@ struct LogIncidentSheet: View {
                               text: $store.description,
                               axis: .vertical)
                         .lineLimit(4...)
+
+                    HStack {
+                        Spacer()
+                        Button {
+                            store.send(.noteMicTapped)
+                        } label: {
+                            switch store.noteVoiceState {
+                            case .idle:
+                                if store.sttModelAvailable {
+                                    Label("Dictate", systemImage: "mic")
+                                        .font(.subheadline)
+                                } else {
+                                    Label("Download & Dictate", systemImage: "cloud.arrow.down")
+                                        .font(.subheadline)
+                                }
+                            case .loadingSTT:
+                                HStack(spacing: 6) {
+                                    ProgressView().scaleEffect(0.8)
+                                    Text("Loading…").font(.caption)
+                                }
+                            case .recording:
+                                Label("Stop", systemImage: "stop.circle.fill")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.red)
+                            case .transcribing:
+                                HStack(spacing: 6) {
+                                    ProgressView().scaleEffect(0.8)
+                                    Text("Transcribing…").font(.caption)
+                                }
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(
+                            store.noteVoiceState == .loadingSTT ||
+                            store.noteVoiceState == .transcribing
+                        )
+                    }
+
+                    if !store.noteTranscriptionPreview.isEmpty {
+                        Text(store.noteTranscriptionPreview)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    if !store.sttModelAvailable && store.noteVoiceState == .idle {
+                        Text("Voice dictation requires a ~150 MB Whisper model download on first use.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Section("Evidence") {

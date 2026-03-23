@@ -44,6 +44,12 @@ final class SystemManager: @unchecked Sendable {
 
     private(set) var isSyncConnected = false
 
+    /// Active sync-stream subscriptions. All four streams are subscribed on connect;
+    /// the PowerSync service uses request.user_id() server-side to filter each stream,
+    /// so non-matching streams (e.g. a ranger subscribing to admin_map_features) complete
+    /// instantly with 0 rows rather than returning unauthorised data.
+    private var syncSubscriptions: [any SyncStreamSubscription] = []
+
     /// Shared instance used by AI tools and other non-TCA code.
     /// The TCA `@Dependency(\.systemManager)` holds the same instance.
     static let shared = SystemManager()
@@ -65,8 +71,23 @@ final class SystemManager: @unchecked Sendable {
 
         try await db.connect(connector: connector)
 
-        // Wait for critical data (park boundaries) before returning
-        try await db.waitForFirstSync(priority: Int32(SyncPriority.critical))
+        // Subscribe to named sync streams. The server filters by request.user_id(),
+        // so only data the current user is authorised to see is returned.
+        // All four are subscribed up-front; non-matching role streams resolve immediately.
+        let globalSub     = try await db.syncStream(name: "global_reference",    params: nil).subscribe()
+        let rangerOwnSub  = try await db.syncStream(name: "ranger_own_features", params: nil).subscribe()
+        let rangerParkSub = try await db.syncStream(name: "ranger_park_data",    params: nil).subscribe()
+        let adminSub      = try await db.syncStream(name: "admin_map_features",  params: nil).subscribe()
+        syncSubscriptions = [globalSub, rangerOwnSub, rangerParkSub, adminSub]
+
+        // Wait for all streams to complete initial sync in parallel.
+        // Park boundaries and spot types must be available before the map renders.
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for sub in syncSubscriptions {
+                group.addTask { try await sub.waitForFirstSync() }
+            }
+            try await group.waitForAll()
+        }
 
         // Set up attachment sync for incident media
         if let bucket = Secrets.supabaseStorageBucket {
@@ -113,6 +134,12 @@ final class SystemManager: @unchecked Sendable {
     }
 
     func disconnect() async throws {
+        // Unsubscribe from all streams before disconnecting so the server
+        // stops sending data and the TTL-based cache timers start cleanly.
+        for sub in syncSubscriptions {
+            try? await sub.unsubscribe()
+        }
+        syncSubscriptions = []
         try await db.disconnect()
         isSyncConnected = false
     }
