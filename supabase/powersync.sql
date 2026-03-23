@@ -1,0 +1,37 @@
+-- ============================================================
+-- Askari AI — PowerSync Scoping Notes
+-- These are NOT executed in the database.
+-- Configure the scoping logic in your PowerSync sync-config.yaml.
+-- ============================================================
+
+-- The handle_new_user() trigger assigns every new staff member to the
+-- first park in the database (by created_at). This means park_id and
+-- staff identity are set at signup, so PowerSync sync scoping works
+-- out-of-the-box without any extra client-side parameters.
+
+-- Recommended table filters for your sync stream queries:
+--
+-- parks:
+--   WHERE id = public.auth_staff_park_id()
+--      OR public.auth_staff_rank() IN ('admin','parks_authority')
+--
+-- staff:
+--   WHERE park_id = public.auth_staff_park_id()
+--      OR public.auth_staff_rank() IN ('admin','parks_authority')
+--      OR user_id = auth.uid()
+--
+-- spot_types:
+--   (no filter — all authenticated users read all active spot types)
+--   WHERE is_active = true
+--
+-- park_boundaries:
+--   WHERE park_id = public.auth_staff_park_id()
+--      OR public.auth_staff_rank() IN ('admin','parks_authority')
+--
+-- map_features:
+--   WHERE created_by = public.auth_staff_id()
+--      OR park_id = public.auth_staff_park_id()
+--      OR public.auth_staff_rank() IN ('admin','park_head','parks_authority')
+--
+-- mission_role_types:
+--   (no filter — reference data, RLS disabled)

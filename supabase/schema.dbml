@@ -1,0 +1,98 @@
+// Askari AI — Database Schema
+// Public schema export with RLS, functions, and triggers
+// Format: DBML (dbdiagram.io compatible)
+
+Project parks_app {
+  database_type: "PostgreSQL"
+  note: 'Public schema export with RLS, functions, and triggers'
+}
+
+Table parks {
+  id         uuid        [pk, default: `gen_random_uuid()`]
+  name       text        [not null]
+  country    text        [not null, default: `'Kenya'::text`]
+  region     text
+  timezone   text        [not null, default: `'Africa/Nairobi'::text`]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  Note: 'RLS enabled'
+}
+
+Table staff {
+  id         uuid        [pk, default: `gen_random_uuid()`]
+  user_id    uuid        [unique]
+  park_id    uuid
+  email      text        [not null, unique]
+  first_name text        [not null]
+  last_name  text        [not null]
+  rank       text        [not null, default: `'ranger'::text`, note: `rank in ('ranger','supervisor','park_head','admin','parks_authority')`]
+  avatar_url text
+  is_active  bool        [not null, default: true]
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  Note: 'RLS enabled'
+}
+
+Table spot_types {
+  id               uuid        [pk, default: `gen_random_uuid()`]
+  code_name        text        [not null, unique]
+  display_name     text        [not null]
+  color_hex        text        [not null, default: `'#FF6B00'::text`]
+  is_active        bool        [not null, default: true]
+  sort_order       int         [not null, default: 0]
+  description      text
+  severity_default text        [not null, default: `'medium'::text`, note: `severity_default in ('low','medium','high','critical')`]
+  created_at       timestamptz [not null, default: `now()`]
+
+  Note: 'RLS enabled'
+}
+
+Table park_boundaries {
+  id         uuid        [pk, default: `gen_random_uuid()`]
+  park_id    uuid        [not null]
+  name       text        [not null]
+  geometry   jsonb       [not null]
+  created_at timestamptz [not null, default: `now()`]
+
+  Note: 'RLS enabled'
+}
+
+Table mission_role_types {
+  id          uuid [pk, default: `gen_random_uuid()`]
+  name        text [not null, unique]
+  description text
+
+  Note: 'RLS disabled'
+}
+
+Table map_features {
+  id                      uuid        [pk, default: `gen_random_uuid()`]
+  park_id                 uuid        [not null]
+  spot_type_id            uuid
+  name                    text        [not null]
+  description             text        [not null, default: `''::text`]
+  geometry                jsonb       [not null]
+  created_by              uuid
+  captured_by_staff_id    uuid
+  created_at              timestamptz [not null, default: `now()`]
+  media_url               jsonb       [not null, default: `'[]'::jsonb`]
+  is_resolved             bool        [not null, default: false]
+  severity                text        [not null, default: `'medium'::text`, note: `severity in ('low','medium','high','critical')`]
+  updated_at              timestamptz [not null, default: `now()`]
+  local_media_identifiers text        [not null, default: `'[]'::text`]
+
+  Note: 'RLS enabled'
+}
+
+// Foreign Keys
+Ref: map_features.park_id             > parks.id
+Ref: map_features.spot_type_id        > spot_types.id
+Ref: map_features.created_by          > staff.id
+Ref: map_features.captured_by_staff_id > staff.id
+
+Ref: staff.park_id  > parks.id
+Ref: staff.user_id  > auth.users.id
+
+Ref: park_boundaries.park_id > parks.id
