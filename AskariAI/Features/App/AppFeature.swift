@@ -66,6 +66,12 @@ struct AppFeature {
                 state.appPhase = .unauthenticated
                 return .none
 
+            case .main(.signOutCompleted):
+                state.authState = .init()
+                state.mainState = .init()
+                state.appPhase = .unauthenticated
+                return .none
+
             default:
                 return .none
             }

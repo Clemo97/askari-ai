@@ -26,6 +26,8 @@ struct MainFeature {
         case dashboard(DashboardFeature.Action)
         case rangerMap(RangerMapFeature.Action)
         case selectTab(State.Tab)
+        case signOutTapped
+        case signOutCompleted
     }
 
     var body: some ReducerOf<Self> {
@@ -49,6 +51,15 @@ struct MainFeature {
 
             case .selectTab(let tab):
                 state.selectedTab = tab
+                return .none
+
+            case .signOutTapped:
+                return .run { send in
+                    try? await systemManager.connector.signOut()
+                    await send(.signOutCompleted)
+                }
+
+            case .signOutCompleted:
                 return .none
 
             default:
@@ -78,12 +89,68 @@ struct MainView: View {
                 .tabItem { Label("Intelligence", systemImage: "chart.bar.xaxis") }
                 .tag(MainFeature.State.Tab.intelligence)
 
-            Text("Settings")
+            SettingsView(store: store)
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
                 .tag(MainFeature.State.Tab.settings)
         }
         .onAppear { store.send(.onAppear) }
         .tint(.green)
+    }
+}
+
+// MARK: - SettingsView
+
+struct SettingsView: View {
+    let store: StoreOf<MainFeature>
+    @State private var showSignOutConfirm = false
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if let user = store.currentUser {
+                    Section("Profile") {
+                        HStack(spacing: 14) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.green.opacity(0.15))
+                                    .frame(width: 48, height: 48)
+                                Text(user.firstName.prefix(1) + user.lastName.prefix(1))
+                                    .font(.headline)
+                                    .foregroundColor(.green)
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(user.fullName)
+                                    .font(.headline)
+                                Text(user.email)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                Text(user.rank.rawValue.replacingOccurrences(of: "_", with: " ").capitalized)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+
+                Section {
+                    Button(role: .destructive) {
+                        showSignOutConfirm = true
+                    } label: {
+                        Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                    }
+                }
+            }
+            .navigationTitle("Settings")
+        }
+        .confirmationDialog("Sign out?", isPresented: $showSignOutConfirm, titleVisibility: .visible) {
+            Button("Sign Out", role: .destructive) {
+                store.send(.signOutTapped)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You will be returned to the login screen.")
+        }
     }
 }
 
