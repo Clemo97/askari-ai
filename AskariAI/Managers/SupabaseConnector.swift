@@ -45,9 +45,28 @@ final class SupabaseConnector: PowerSyncBackendConnectorProtocol, @unchecked Sen
 
                 switch entry.op {
                 case .put:
-                    var data = entry.opData ?? [:]
-                    data["id"] = entry.id
-                    try await client.from(table).upsert(data).execute()
+                    var stringData = entry.opData ?? [:]
+                    stringData["id"] = entry.id
+
+                    // Convert JSON-like text values to AnyJSON objects so PostgREST
+                    // stores them as proper JSONB objects, not JSONB strings.
+                    var jsonData: [String: AnyJSON] = [:]
+                    for (key, optVal) in stringData {
+                        guard let val = optVal else {
+                            jsonData[key] = .null
+                            continue
+                        }
+                        let trimmed = val.trimmingCharacters(in: .whitespaces)
+                        if (trimmed.hasPrefix("{") || trimmed.hasPrefix("[")) {
+                            if let rawData = trimmed.data(using: .utf8),
+                               let decoded = try? JSONDecoder().decode(AnyJSON.self, from: rawData) {
+                                jsonData[key] = decoded
+                                continue
+                            }
+                        }
+                        jsonData[key] = .string(val)
+                    }
+                    try await client.from(table).upsert(jsonData).execute()
 
                 case .patch:
                     guard let opData = entry.opData else { continue }

@@ -73,7 +73,8 @@ let map_features = Table(
         .text("captured_by_staff_id"),
         .text("created_at"),
         .text("updated_at"),
-        .text("media_url"),             // JSONB array stored as text
+        .text("media_url"),             // JSONB array of attachment IDs
+        .text("local_media_identifiers"), // JSONB array of PhotoKit local identifiers
         .integer("is_resolved"),
         .text("resolved_at"),
         .text("resolved_by"),

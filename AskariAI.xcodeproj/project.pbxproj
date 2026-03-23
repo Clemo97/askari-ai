@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		02081055265C24CE7BB95866 /* IncidentDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 844081140E1D3ACC36C05207 /* IncidentDetailSheet.swift */; };
 		08CC211002388A7D75F8F711 /* AskariAIApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6814058CDFDE809198B36CFA /* AskariAIApp.swift */; };
 		159E82C576DD635AC1FF3386 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 65B239A6E81736B32914E1F3 /* Supabase */; };
 		2230181AB19C1906AB61907F /* SystemManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E360C7261A5561E794BCC41 /* SystemManager.swift */; };
@@ -56,6 +57,7 @@
 		749D7D1CD65D0B5F239830F2 /* ImagePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePickerView.swift; sourceTree = "<group>"; };
 		794FD9C8EBB1AFE803D5CCC7 /* RangerMapFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RangerMapFeature.swift; sourceTree = "<group>"; };
 		7E5FCD93FAB339AECEE0DB8A /* DashboardFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardFeature.swift; sourceTree = "<group>"; };
+		844081140E1D3ACC36C05207 /* IncidentDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IncidentDetailSheet.swift; sourceTree = "<group>"; };
 		8E1A7EB4CD9062E3318CD4D9 /* ActiveMissionFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveMissionFeature.swift; sourceTree = "<group>"; };
 		8FA0EEC003026D19AD6AA559 /* _Secrets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = _Secrets.swift; sourceTree = "<group>"; };
 		96456BD7E32739FA5E0A4D56 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -256,6 +258,7 @@
 		B46457CD0EE21DB8BDED3268 /* Incidents */ = {
 			isa = PBXGroup;
 			children = (
+				844081140E1D3ACC36C05207 /* IncidentDetailSheet.swift */,
 				43C7A2ADE90E156BE9CC4185 /* LogIncidentFeature.swift */,
 				794FD9C8EBB1AFE803D5CCC7 /* RangerMapFeature.swift */,
 			);
@@ -403,6 +406,7 @@
 				4263C35CB7C2D8C142C5F6EF /* DashboardFeature.swift in Sources */,
 				5DF10872E6291C364105AC5B /* ImagePickerView.swift in Sources */,
 				CBF5BB4669BF2E4D204549BF /* Incident.swift in Sources */,
+				02081055265C24CE7BB95866 /* IncidentDetailSheet.swift in Sources */,
 				5B7556454DEFABA19E70FF94 /* LogIncidentFeature.swift in Sources */,
 				696140F631C283BE9132D1F3 /* MainFeature.swift in Sources */,
 				DB2F08BE3F3E91B7BEDE8FDC /* MediaItem.swift in Sources */,

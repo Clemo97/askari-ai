@@ -1,5 +1,6 @@
 import ComposableArchitecture
 import CoreLocation
+import Photos
 import SwiftUI
 import UIKit
 
@@ -134,9 +135,12 @@ struct LogIncidentFeature {
                             parkId = firstPark
                         }
 
-                        // Upload media items and collect PowerSync attachment IDs
+                        // Upload media items — collect PowerSync attachment IDs + PhotoKit IDs
                         var attachmentIds: [String] = []
+                        var localIdentifiers: [String] = []
                         for item in mediaItems {
+                            // Step 1: Save to PowerSync AttachmentQueue (primary)
+                            var attachmentId: String? = nil
                             if let queue = systemManager.attachments,
                                let attachment = try? await queue.saveFile(
                                 data: item.data,
@@ -144,8 +148,14 @@ struct LogIncidentFeature {
                                 fileExtension: item.fileExtension,
                                 updateHook: { _, _ in }
                                ) {
-                                attachmentIds.append(attachment.id)
+                                attachmentId = attachment.id
                             }
+                            guard let aid = attachmentId else { continue }
+                            attachmentIds.append(aid)
+
+                            // Step 2: Best-effort save to device Photo Library (fallback)
+                            let localId = await saveToPhotoLibrary(item: item)
+                            localIdentifiers.append(localId ?? "")
                         }
 
                         let mediaJSON: String
@@ -156,19 +166,28 @@ struct LogIncidentFeature {
                             mediaJSON = "[]"
                         }
 
+                        let localMediaJSON: String
+                        if let encoded = try? JSONEncoder().encode(localIdentifiers),
+                           let str = String(data: encoded, encoding: .utf8) {
+                            localMediaJSON = str
+                        } else {
+                            localMediaJSON = "[]"
+                        }
+
                         let incidentId = UUID()
-                        let geoJSON = """
-                            {"type":"Point","coordinates":[\(coordinate.longitude),\(coordinate.latitude)]}
-                        """
+                        let geoJSON = "{\"type\":\"Point\",\"coordinates\":[\(coordinate.longitude),\(coordinate.latitude)]}"
 
                         // PowerSync local write — syncs to Supabase via uploadData
+                        let nowISO = SystemManager.isoString(from: Date())
+
                         try await systemManager.db.execute(
                             sql: """
                                 INSERT INTO map_features
                                     (id, park_id, mission_id, spot_type_id, name, description,
                                      geometry, created_by, captured_by_staff_id,
-                                     severity, media_url, is_resolved)
-                                VALUES (?,?,?,?,?,?,?,?,?,?,?,0)
+                                     severity, media_url, local_media_identifiers,
+                                     is_resolved, created_at, updated_at)
+                                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0,?,?)
                             """,
                             parameters: [
                                 incidentId.uuidString,
@@ -181,7 +200,10 @@ struct LogIncidentFeature {
                                 staff.id.uuidString,
                                 staff.id.uuidString,
                                 severity.rawValue,
-                                mediaJSON
+                                mediaJSON,
+                                localMediaJSON,
+                                nowISO,
+                                nowISO
                             ]
                         )
                         await send(.saved)
@@ -227,6 +249,38 @@ struct LogIncidentFeature {
                 return .none
             }
         }
+    }
+}
+
+// MARK: - PhotoKit helper
+
+/// Best-effort save to device photo library. Returns the PHAsset localIdentifier.
+/// Non-fatal: returns nil on permission denial or any error.
+private func saveToPhotoLibrary(item: MediaItem) async -> String? {
+    let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+    guard status == .authorized || status == .limited else { return nil }
+
+    return await withCheckedContinuation { continuation in
+        PHPhotoLibrary.shared().performChanges({
+            switch item {
+            case .image(let data):
+                if let image = UIImage(data: data) {
+                    let req = PHAssetChangeRequest.creationRequestForAsset(from: image)
+                    continuation.resume(returning: req.placeholderForCreatedAsset?.localIdentifier)
+                } else {
+                    continuation.resume(returning: nil)
+                }
+            case .video(_, let url):
+                guard let url else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                let req = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
+                continuation.resume(returning: req?.placeholderForCreatedAsset?.localIdentifier)
+            }
+        }, completionHandler: { success, _ in
+            if !success { continuation.resume(returning: nil) }
+        })
     }
 }
 

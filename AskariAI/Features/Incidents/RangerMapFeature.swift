@@ -21,6 +21,7 @@ struct RangerMapFeature {
         var isLoading = true
         var selectedCoordinate: CLLocationCoordinate2D? = nil
         var logIncident: LogIncidentFeature.State? = nil
+        var selectedIncident: Incident? = nil
         var mapStyleType: MapStyleType = .standard
 
         enum MapStyleType: Equatable { case standard, satellite, hybrid }
@@ -39,6 +40,7 @@ struct RangerMapFeature {
             lhs.spotTypes == rhs.spotTypes &&
             lhs.isLoading == rhs.isLoading &&
             lhs.logIncident == rhs.logIncident &&
+            lhs.selectedIncident == rhs.selectedIncident &&
             lhs.mapStyleType == rhs.mapStyleType &&
             lhs.selectedCoordinate?.latitude == rhs.selectedCoordinate?.latitude &&
             lhs.selectedCoordinate?.longitude == rhs.selectedCoordinate?.longitude
@@ -54,6 +56,8 @@ struct RangerMapFeature {
         case mapTapped(CLLocationCoordinate2D)
         case updateCamera(MapCameraPosition)
         case toggleMapStyle
+        case incidentTapped(Incident)
+        case dismissIncidentDetail
         case logIncident(LogIncidentFeature.Action)
         case dismissLogSheet
     }
@@ -132,6 +136,14 @@ struct RangerMapFeature {
                 }
                 return .none
 
+            case .incidentTapped(let incident):
+                state.selectedIncident = incident
+                return .none
+
+            case .dismissIncidentDetail:
+                state.selectedIncident = nil
+                return .none
+
             case .logIncident(.cancel):
                 state.logIncident = nil
                 state.selectedCoordinate = nil
@@ -190,7 +202,12 @@ struct RangerMapView: View {
                             coordinate: incident.coordinate,
                             anchor: .bottom
                         ) {
-                            IncidentPin(color: color, severity: incident.severity)
+                            Button {
+                                store.send(.incidentTapped(incident))
+                            } label: {
+                                IncidentPin(color: color, severity: incident.severity)
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
 
@@ -253,6 +270,18 @@ struct RangerMapView: View {
                 LogIncidentSheet(store: logStore)
                     .presentationDetents([.medium, .large])
             }
+        }
+        .sheet(
+            item: Binding(
+                get: { store.selectedIncident },
+                set: { if $0 == nil { store.send(.dismissIncidentDetail) } }
+            )
+        ) { incident in
+            IncidentDetailSheet(
+                incident: incident,
+                spotTypes: store.spotTypes
+            )
+            .presentationDetents([.medium, .large])
         }
         .navigationTitle("Patrol Map")
         .navigationBarTitleDisplayMode(.inline)

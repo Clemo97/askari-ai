@@ -14,7 +14,8 @@ struct Incident: Identifiable, Codable {
     var capturedByStaffId: UUID?
     var createdBy: UUID
     var createdAt: Date
-    var mediaAttachmentIds: [String]// attachment IDs from AttachmentQueue
+    var mediaAttachmentIds: [String]   // attachment IDs from AttachmentQueue
+    var localMediaIdentifiers: [String] // matching PhotoKit localIdentifiers (positional)
     var parkId: UUID
     var isResolved: Bool
     var resolvedAt: Date?
@@ -28,7 +29,7 @@ struct Incident: Identifiable, Codable {
     enum CodingKeys: String, CodingKey {
         case id, name, description, latitude, longitude
         case spotTypeId, missionId, capturedByStaffId, createdBy, createdAt
-        case mediaAttachmentIds, parkId, isResolved, resolvedAt, resolvedBy, severity
+        case mediaAttachmentIds, localMediaIdentifiers, parkId, isResolved, resolvedAt, resolvedBy, severity
     }
 
     init(
@@ -42,6 +43,7 @@ struct Incident: Identifiable, Codable {
         createdBy: UUID,
         createdAt: Date = Date(),
         mediaAttachmentIds: [String] = [],
+        localMediaIdentifiers: [String] = [],
         parkId: UUID,
         isResolved: Bool = false,
         resolvedAt: Date? = nil,
@@ -58,6 +60,7 @@ struct Incident: Identifiable, Codable {
         self.createdBy = createdBy
         self.createdAt = createdAt
         self.mediaAttachmentIds = mediaAttachmentIds
+        self.localMediaIdentifiers = localMediaIdentifiers
         self.parkId = parkId
         self.isResolved = isResolved
         self.resolvedAt = resolvedAt
@@ -77,6 +80,7 @@ struct Incident: Identifiable, Codable {
         spotTypeId = try c.decodeIfPresent(UUID.self, forKey: .spotTypeId)
         missionId = try c.decodeIfPresent(UUID.self, forKey: .missionId)
         capturedByStaffId = try c.decodeIfPresent(UUID.self, forKey: .capturedByStaffId)
+        localMediaIdentifiers = (try? c.decode([String].self, forKey: .localMediaIdentifiers)) ?? []
         createdBy = try c.decode(UUID.self, forKey: .createdBy)
         createdAt = try c.decode(Date.self, forKey: .createdAt)
         mediaAttachmentIds = try c.decode([String].self, forKey: .mediaAttachmentIds)
@@ -120,16 +124,29 @@ extension Incident {
             let parkStr = try? cursor.getString(name: "park_id"), let parkId = UUID(uuidString: parkStr)
         else { return nil }
 
-        let geometryJSON = (try? cursor.getStringOptional(name: "geometry")) ?? "{}"
+        let geometryRaw = ((try? cursor.getStringOptional(name: "geometry")) ?? nil) ?? "{}"
+        // Handle double-encoded JSONB: if stored as a JSONB string it comes back with surrounding
+        // quotes (e.g. `"{\"type\":\"Point\",…}"`) — unwrap it first.
+        let geometryUnwrapped: String
+        let trimmedRaw = geometryRaw.trimmingCharacters(in: .whitespaces)
+        if trimmedRaw.hasPrefix("\""),
+           let inner = try? JSONDecoder().decode(String.self, from: Data(trimmedRaw.utf8)) {
+            geometryUnwrapped = inner.trimmingCharacters(in: .whitespaces)
+        } else {
+            geometryUnwrapped = trimmedRaw
+        }
         var lat = 0.0, lon = 0.0
-        if let data = (geometryJSON ?? "{}").data(using: .utf8),
+        if let data = geometryUnwrapped.data(using: .utf8),
            let geo = try? JSONDecoder().decode(GeoJSONPoint.self, from: data) {
             lon = geo.coordinates[0]
             lat = geo.coordinates[1]
         }
 
         let mediaJSON = (try? cursor.getStringOptional(name: "media_url")) ?? "[]"
-        let mediaIds = (try? JSONDecoder().decode([String].self, from: Data((mediaJSON ?? "[]").utf8))) ?? []
+        let mediaIds = parseJSONStringArray(mediaJSON ?? "[]")
+
+        let localMediaJSON = (try? cursor.getStringOptional(name: "local_media_identifiers")) ?? "[]"
+        let localIds = parseJSONStringArray(localMediaJSON ?? "[]")
 
         self.init(
             id: id,
@@ -142,6 +159,7 @@ extension Incident {
             createdBy: createdBy,
             createdAt: createdAt,
             mediaAttachmentIds: mediaIds,
+            localMediaIdentifiers: localIds,
             parkId: parkId,
             isResolved: ((try? cursor.getIntOptional(name: "is_resolved")) ?? 0) == 1,
             resolvedAt: SystemManager.parseDate((try? cursor.getStringOptional(name: "resolved_at")) ?? nil),
@@ -172,7 +190,10 @@ extension Incident {
         }
 
         let mediaJSON = row["media_url"] as? String ?? "[]"
-        let mediaIds = (try? JSONDecoder().decode([String].self, from: Data(mediaJSON.utf8))) ?? []
+        let mediaIds = parseJSONStringArray(mediaJSON)
+
+        let localMediaJSON = row["local_media_identifiers"] as? String ?? "[]"
+        let localIds = parseJSONStringArray(localMediaJSON)
 
         self.init(
             id: id,
@@ -185,6 +206,7 @@ extension Incident {
             createdBy: createdBy,
             createdAt: createdAt,
             mediaAttachmentIds: mediaIds,
+            localMediaIdentifiers: localIds,
             parkId: parkId,
             isResolved: (row["is_resolved"] as? String) == "1",
             resolvedAt: SystemManager.parseDate(row["resolved_at"] as? String),
@@ -195,6 +217,26 @@ extension Incident {
 }
 
 // MARK: - GeoJSON helpers
+
+/// Parses both JSON arrays `["a","b"]` and PostgreSQL array literals `{"a","b"}`.
+private func parseJSONStringArray(_ raw: String) -> [String] {
+    let s = raw.trimmingCharacters(in: .whitespaces)
+    if s.hasPrefix("[") {
+        return (try? JSONDecoder().decode([String].self, from: Data(s.utf8))) ?? []
+    }
+    if s.hasPrefix("{") && s.hasSuffix("}") {
+        // Strip braces, split on commas, remove surrounding quotes
+        let inner = String(s.dropFirst().dropLast())
+        return inner.components(separatedBy: ",").compactMap { token -> String? in
+            let t = token.trimmingCharacters(in: .whitespaces)
+            if t.hasPrefix("\"") && t.hasSuffix("\"") {
+                return String(t.dropFirst().dropLast())
+            }
+            return t.isEmpty ? nil : t
+        }
+    }
+    return []
+}
 
 struct GeoJSONPoint: Codable {
     let type: String
@@ -219,6 +261,7 @@ extension Incident: Equatable {
         lhs.createdBy == rhs.createdBy &&
         lhs.createdAt == rhs.createdAt &&
         lhs.mediaAttachmentIds == rhs.mediaAttachmentIds &&
+        lhs.localMediaIdentifiers == rhs.localMediaIdentifiers &&
         lhs.parkId == rhs.parkId &&
         lhs.isResolved == rhs.isResolved &&
         lhs.resolvedAt == rhs.resolvedAt &&
