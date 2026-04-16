@@ -96,8 +96,6 @@ enum Secrets {
     static let powerSyncEndpoint = "https://<your-instance-id>.powersync.journeyapps.com"
     // Optional — set to your Supabase Storage bucket name to enable media attachments
     static let supabaseStorageBucket: String? = "incident-media"
-    // Optional — set to your Cactus Cloud key for hybrid AI fallback
-    static let cactusCloudKey: String? = nil
 }
 ```
 
