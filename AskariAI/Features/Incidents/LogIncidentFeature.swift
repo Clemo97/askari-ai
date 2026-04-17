@@ -393,7 +393,7 @@ struct LogIncidentSheet: View {
                                     Label("Dictate", systemImage: "mic")
                                         .font(.subheadline)
                                 } else {
-                                    Label("Download & Dictate", systemImage: "cloud.arrow.down")
+                                    Label("Enable & Dictate", systemImage: "mic.badge.plus")
                                         .font(.subheadline)
                                 }
                             case .loadingSTT:
@@ -427,7 +427,7 @@ struct LogIncidentSheet: View {
                     }
 
                     if !store.sttModelAvailable && store.noteVoiceState == .idle {
-                        Text("Voice dictation requires a ~150 MB Whisper model download on first use.")
+                        Text("Voice dictation requires speech recognition permission. Tap to enable.")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }

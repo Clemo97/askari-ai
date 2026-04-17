@@ -227,7 +227,7 @@ struct DashboardView: View {
         case .loading:
             HStack(spacing: 4) {
                 ProgressView().scaleEffect(0.7)
-                Text("Downloading model…")
+                Text("Checking availability…")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

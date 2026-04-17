@@ -1,50 +1,45 @@
 import Foundation
-import Cactus
+import FoundationModels
 import PowerSync
 
-// MARK: - Cursor helper
+// MARK: - SQL cursor helper
 
-/// Converts a SqlCursor row into a convenience dictionary of column → String?.
-private func cursorToDict(_ cursor: any SqlCursor) -> [String: String?] {
-    var dict: [String: String?] = [:]
+private func row(_ cursor: any SqlCursor) -> [String: String?] {
+    var d: [String: String?] = [:]
     for (name, _) in cursor.columnNames {
-        dict[name] = (try? cursor.getStringOptional(name: name)) ?? nil
+        d[name] = try? cursor.getStringOptional(name: name)
     }
-    return dict
+    return d
 }
 
-// MARK: - QueryRecentIncidentsTool
-// Queries map_features by incident type and date range.
+// MARK: - Tools
 
-struct QueryRecentIncidentsTool: CactusFunction {
-    @JSONSchema
-    struct Input: Codable, Sendable {
-        @JSONSchemaProperty(description: "Number of days back to look (e.g. 7, 14, 30).")
-        let daysBack: Int
+struct QueryRecentIncidentsTool: Tool {
+    let name = "query_recent_incidents"
+    let description = "Get recent poaching incidents from the patrol database. Returns incident type, description, date, severity, and ranger name."
 
-        @JSONSchemaProperty(description: "Incident type filter, e.g. 'snare', 'carcass'. Leave empty for all types.")
-        let incidentType: String
+    @Generable
+    struct Arguments {
+        @Guide(description: "Days back to search, e.g. 7, 14, 30")
+        var daysBack: Int
+
+        @Guide(description: "Incident type filter e.g. snare, carcass, poacher_camp. Use empty string for all types.")
+        var incidentType: String
     }
 
-    let name = "query_recent_incidents"
-    let description = "Get recent poaching incidents. Returns incident names, descriptions, dates, severity, and ranger who logged them."
-
-    func invoke(input: Input) async throws -> sending String {
+    func call(arguments: Arguments) async throws -> String {
         let db = SystemManager.shared.db
-        var conditions = ["mf.created_at >= datetime('now', '-\(input.daysBack) days')"]
+        var conditions = ["mf.created_at >= datetime('now', '-\(arguments.daysBack) days')"]
         var params: [String?] = []
 
-        if !input.incidentType.isEmpty {
-            // Match against both code_name (e.g. "spent_cartridge") and
-            // display_name (e.g. "Spent Cartridge") so any user phrasing works.
-            let term: String? = "%\(input.incidentType.lowercased())%"
+        if !arguments.incidentType.isEmpty {
+            let term: String? = "%\(arguments.incidentType.lowercased())%"
             conditions.append("(LOWER(st.code_name) LIKE ? OR LOWER(st.display_name) LIKE ?)")
             params.append(term)
             params.append(term)
         }
 
-        let whereClause = conditions.isEmpty ? "" : "WHERE " + conditions.joined(separator: " AND ")
-
+        let whereClause = "WHERE " + conditions.joined(separator: " AND ")
         let sql = """
             SELECT
                 mf.name,
@@ -61,133 +56,43 @@ struct QueryRecentIncidentsTool: CactusFunction {
             LIMIT 20
         """
 
-        let rows = try await db.getAll(sql: sql, parameters: params, mapper: cursorToDict)
-
-        if rows.isEmpty {
-            let typeLabel = input.incidentType.isEmpty ? "" : " for \(input.incidentType)"
-            return "No incidents found in the last \(input.daysBack) day(s)\(typeLabel)."
+        let rows = try await db.getAll(sql: sql, parameters: params, mapper: row)
+        guard !rows.isEmpty else {
+            let label = arguments.incidentType.isEmpty ? "" : " for '\(arguments.incidentType)'"
+            return "No incidents found in the last \(arguments.daysBack) day(s)\(label)."
         }
 
-        let formatted = rows.enumerated().map { i, row -> String in
-            let type = row["spot_type"] as? String ?? "Unknown type"
-            let desc = (row["description"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let ranger = row["ranger_name"] as? String ?? "Unknown ranger"
-            let rawDate = row["created_at"] as? String ?? ""
-            let severity = (row["severity"] as? String ?? "").capitalized
-            let dateLabel = Self.formatDate(rawDate)
-            let descPart = desc.isEmpty ? "" : " — \(desc)"
-            return "\(i + 1). \(type)\(descPart)\n   By \(ranger) · \(dateLabel) · \(severity)"
-        }.joined(separator: "\n")
-
-        let header = "Found \(rows.count) incident(s) in the last \(input.daysBack) day(s):"
-        return "\(header)\n\(formatted)"
-    }
-
-    private static func formatDate(_ iso: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: iso) {
-            let out = DateFormatter()
-            out.dateStyle = .medium
-            out.timeStyle = .short
-            return out.string(from: date)
+        let lines = rows.enumerated().map { i, r -> String in
+            let type   = r["spot_type"]    as? String ?? "Unknown"
+            let desc   = (r["description"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+            let ranger = r["ranger_name"]  as? String ?? "Unknown ranger"
+            let date   = String((r["created_at"] as? String ?? "").prefix(10))
+            let sev    = (r["severity"]    as? String ?? "").capitalized
+            let detail = desc.isEmpty ? "" : ": \(desc)"
+            return "\(i + 1). \(type)\(detail) — \(ranger), \(date), \(sev)"
         }
-        // Fallback: trim to just date portion
-        return String(iso.prefix(10))
+
+        return "Found \(rows.count) incident(s) in the last \(arguments.daysBack) day(s):\n"
+             + lines.joined(separator: "\n")
     }
 }
 
-// MARK: - LogIncidentTool
-
-struct LogIncidentTool: CactusFunction {
-    @JSONSchema
-    struct Input: Codable, Sendable {
-        @JSONSchemaProperty(description: "Type of incident, e.g. 'snare', 'carcass', 'poacher_camp'.")
-        let incidentType: String
-
-        @JSONSchemaProperty(description: "Ranger's description of what they found.")
-        let description: String
-
-        @JSONSchemaProperty(description: "Severity: 'low', 'medium', 'high', or 'critical'.")
-        let severity: String
-
-        @JSONSchemaProperty(description: "Optional: ranger staff UUID who found this. Leave empty to use current user.")
-        let staffId: String
-    }
-
-    let name = "log_incident"
-    let description = "Log a new poaching incident into the local database. This will sync to the backend when connectivity is available."
-
-    func invoke(input: Input) async throws -> sending String {
-        let db = SystemManager.shared.db
-
-        // Resolve spot type ID from code name
-        let spotTypes = try await db.getAll(
-            sql: "SELECT id FROM spot_types WHERE code_name = ? LIMIT 1",
-            parameters: [input.incidentType.lowercased()],
-            mapper: cursorToDict
-        )
-        let spotTypeId = spotTypes.first?["id"] as? String
-
-        // Resolve park_id from local parks table
-        let parks = try await db.getAll(
-            sql: "SELECT id FROM parks LIMIT 1",
-            parameters: [],
-            mapper: cursorToDict
-        )
-        let parkId = parks.first?["id"] as? String ?? ""
-
-        let staffId = input.staffId.isEmpty ? "" : input.staffId
-        let incidentId = UUID().uuidString
-        let now = SystemManager.isoString(from: Date())
-
-        // Geometry placeholder — in production, use the ranger's current GPS location
-        let geometry = #"{"type":"Point","coordinates":[0,0]}"#
-
-        try await db.execute(
-            sql: """
-            INSERT INTO map_features
-                (id, name, description, geometry, created_by, captured_by_staff_id,
-                 created_at, updated_at, media_url, spot_type_id, park_id,
-                 is_resolved, severity)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
-            """,
-            parameters: [
-                incidentId,
-                input.incidentType.replacingOccurrences(of: "_", with: " ").capitalized,
-                input.description,
-                geometry,
-                staffId, staffId,
-                now, now,
-                "[]",
-                spotTypeId,
-                parkId,
-                input.severity,
-            ] as [Sendable?]
-        )
-
-        return "✅ Incident logged: \(input.incidentType) — \"\(input.description)\" [severity: \(input.severity)]. It will sync when connectivity is available."
-    }
-}
-
-// MARK: - GetRangerStatsTool
-
-struct GetRangerStatsTool: CactusFunction {
-    @JSONSchema
-    struct Input: Codable, Sendable {
-        @JSONSchemaProperty(description: "Number of days back to look for stats (e.g. 30).")
-        let daysBack: Int
-
-        @JSONSchemaProperty(description: "Limit the number of rangers returned (e.g. 5 for top 5).")
-        let limit: Int
-    }
-
+struct GetRangerStatsTool: Tool {
     let name = "get_ranger_stats"
-    let description = "Get a leaderboard of rangers ranked by number of incidents logged in a time period."
+    let description = "Ranger leaderboard ranked by number of incidents logged in a time period."
 
-    func invoke(input: Input) async throws -> sending String {
-        let db = SystemManager.shared.db
-        let lim = max(1, min(input.limit, 20))
+    @Generable
+    struct Arguments {
+        @Guide(description: "Days back to look for stats, e.g. 30")
+        var daysBack: Int
+
+        @Guide(description: "Max number of rangers to return, e.g. 5")
+        var limit: Int
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        let db  = SystemManager.shared.db
+        let lim = max(1, min(arguments.limit, 20))
 
         let rows = try await db.getAll(
             sql: """
@@ -196,22 +101,89 @@ struct GetRangerStatsTool: CactusFunction {
                     COUNT(mf.id) AS incident_count
                 FROM map_features mf
                 JOIN staff s ON s.id = mf.captured_by_staff_id
-                WHERE mf.created_at >= datetime('now', '-\(input.daysBack) days')
+                WHERE mf.created_at >= datetime('now', '-\(arguments.daysBack) days')
                 GROUP BY mf.captured_by_staff_id
                 ORDER BY incident_count DESC
                 LIMIT \(lim)
             """,
             parameters: [],
-            mapper: cursorToDict
+            mapper: row
         )
 
-        if rows.isEmpty { return "No incident data available for the last \(input.daysBack) days." }
+        guard !rows.isEmpty else {
+            return "No incident data available for the last \(arguments.daysBack) days."
+        }
 
-        let lines = rows.enumerated().map { i, row -> String in
-            let name = row["ranger_name"] as? String ?? "Unknown"
-            let count = row["incident_count"] as? String ?? "0"
+        let lines = rows.enumerated().map { i, r -> String in
+            let name  = r["ranger_name"]    as? String ?? "Unknown"
+            let count = r["incident_count"] as? String ?? "0"
             return "\(i + 1). \(name) — \(count) incidents"
         }
-        return "Top rangers (last \(input.daysBack) days):\n" + lines.joined(separator: "\n")
+        return "Top rangers (last \(arguments.daysBack) days):\n" + lines.joined(separator: "\n")
+    }
+}
+
+struct LogIncidentTool: Tool {
+    let name = "log_incident"
+    let description = "Log a new poaching incident to the local database. It will sync to the server when connectivity returns."
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "Incident type code, e.g. snare, carcass, poacher_camp, spent_cartridge")
+        var incidentType: String
+
+        @Guide(description: "Ranger's description of what was found")
+        var description: String
+
+        @Guide(description: "Severity: low, medium, high, or critical")
+        var severity: String
+
+        @Guide(description: "Staff UUID of the ranger (optional — leave empty to omit)")
+        var staffId: String
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        let db = SystemManager.shared.db
+
+        let spotRows = try await db.getAll(
+            sql: "SELECT id FROM spot_types WHERE LOWER(code_name) = ? LIMIT 1",
+            parameters: [arguments.incidentType.lowercased()],
+            mapper: row
+        )
+        let spotTypeId = spotRows.first?["id"] as? String
+
+        let parkRows = try await db.getAll(
+            sql: "SELECT id FROM parks LIMIT 1",
+            parameters: [],
+            mapper: row
+        )
+        let parkId = parkRows.first?["id"] as? String ?? ""
+
+        let incidentId = UUID().uuidString
+        let now        = SystemManager.isoString(from: Date())
+        let geometry   = #"{"type":"Point","coordinates":[0,0]}"#
+        let staffId: String? = arguments.staffId.isEmpty ? nil : arguments.staffId
+
+        try await db.execute(
+            sql: """
+                INSERT INTO map_features
+                    (id, name, description, geometry, created_by, captured_by_staff_id,
+                     created_at, updated_at, media_url, spot_type_id, park_id, is_resolved, severity)
+                VALUES (?,?,?,?,?,?,?,?,'[]',?,?,0,?)
+            """,
+            parameters: [
+                incidentId,
+                arguments.incidentType.replacingOccurrences(of: "_", with: " ").capitalized,
+                arguments.description,
+                geometry,
+                staffId, staffId,
+                now, now,
+                spotTypeId,
+                parkId,
+                arguments.severity,
+            ] as [Sendable?]
+        )
+
+        return "Incident logged: \(arguments.incidentType) — \"\(arguments.description)\" [severity: \(arguments.severity)]. Will sync when online."
     }
 }

@@ -1,243 +1,188 @@
 import Foundation
-import Cactus
+import FoundationModels
+import Speech
 import AVFoundation
 
 // MARK: - AIManager
-// Singleton that owns CactusAgentSession, CactusSTTSession, and CactusVADSession.
-// Models are loaded once and reused. Call destroy() only when exiting the AI flow entirely.
+// Manages Apple Foundation Models sessions for all intelligence features,
+// and SFSpeechRecognizer for on-device voice dictation.
+//
+// No model downloads required — Apple Intelligence is built into the OS.
+// Availability is gated by SystemLanguageModel.default.isAvailable.
 
 @MainActor
 final class AIManager {
     static let shared = AIManager()
 
-    private var agentSession: CactusAgentSession?       // RangerCopilot (thinking model)
-    private var dashboardModelURL: URL?         // Admin dashboard — stores downloaded model path
-    private var sttSession: CactusSTTSession?
-    private var vadSession: CactusVADSession?
-    private var transcriptionStream: CactusTranscriptionStream?
-    private var audioEngine: AVAudioEngine?
+    // MARK: - Sessions
 
-    private init() {
-        if let key = Secrets.cactusCloudKey {
-            Cactus.cactusCloudAPIKey = key
-        }
-    }
+    // Per-conversation session for RangerCopilot.
+    // Persists across turns so the LLM retains full conversation context.
+    private var copilotSession: LanguageModelSession?
 
-    // MARK: - Model loading
+    // Flag that a one-shot dashboard session can be created when queried.
+    private var dashboardReady = false
 
-    func loadModels() async throws {
-        // LLM (thinking model for reasoning + function calling)
-        let lmURL = try await CactusModelsDirectory.shared.modelURL(
-            for: .lfm2_5_1_2bThinking()
-        )
-        agentSession = try CactusAgentSession(
-            from: lmURL,
-            functions: makeTools()
-        ) {
-            rangerSystemPrompt
-        }
-
-        // STT — Whisper for field transcription
-        let whisperURL = try await CactusModelsDirectory.shared.modelURL(
-            for: .whisperSmall()
-        )
-        sttSession = try CactusSTTSession(from: whisperURL)
-
-        // VAD — strips silence before transcription to save compute
-        let vadURL = try await CactusModelsDirectory.shared.modelURL(for: .sileroVad())
-        vadSession = try CactusVADSession(from: vadURL)
-    }
-
-    // MARK: - Dashboard Natural Language Query
-    //
-    // The thinking model (lfm2_5_1_2bThinking) generates unbounded <think> blocks
-    // and never emits </think> before hitting context limits, making it unusable
-    // for structured output or function-calling dispatch.
-    //
-    // Solution: parse intent and dispatch entirely in Swift (fast, zero-latency,
-    // deterministic). The CactusFunction tool implementations still execute the
-    // actual SQL queries — we just call them from Swift rather than via the LLM.
-    // The downloaded model remains available for RangerCopilotFeature.
-
-    /// Returns true if the Whisper model is already on disk. Synchronous — no download triggered.
-    func isSTTModelDownloaded() -> Bool {
-        CactusModelsDirectory.shared.storedModelURL(for: .whisperSmall()) != nil
-    }
-
-    /// Ensures the Whisper model file is present on disk (downloads if needed).
-    /// Does NOT create a CactusSTTSession — the session is built just-in-time inside
-    /// stopNoteRecording(), after AVAudioRecorder has fully stopped. Creating a
-    /// CactusSTTSession before recording starts activates Cactus audio infrastructure
-    /// that conflicts with AVAudioRecorder, producing a corrupt/empty WAV file.
-    func loadSTTIfNeeded() async throws {
-        _ = try await CactusModelsDirectory.shared.modelURL(for: .whisperSmall())
-    }
-
-    /// Warms the model cache so the binary is ready for RangerCopilot.
-    /// No-op if already downloaded.
-    func loadLLMOnly() async throws {
-        guard dashboardModelURL == nil else { return }
-        dashboardModelURL = try await CactusModelsDirectory.shared.modelURL(
-            for: .lfm2_5_1_2bThinking()
-        )
-    }
-
-    /// Natural-language query → live PowerSync data.
-    /// Intent is parsed in Swift; SQL is executed via CactusFunction tool implementations.
-    func querySingle(_ text: String) async throws -> String {
-        guard dashboardModelURL != nil else { throw AIError.modelsNotLoaded }
-        let intent = parseQueryIntent(text)
-        let result: String
-        switch intent.action {
-        case .rangerStats:
-            let input = GetRangerStatsTool.Input(daysBack: intent.daysBack, limit: intent.limit)
-            result = (try? await GetRangerStatsTool().invoke(input: input)) ?? "No ranger data found."
-        default:
-            let input = QueryRecentIncidentsTool.Input(daysBack: intent.daysBack, incidentType: intent.incidentType)
-            result = (try? await QueryRecentIncidentsTool().invoke(input: input)) ?? "No incidents found."
-        }
-        return result
-    }
-
-    // MARK: - Swift NL Intent Parser
-
-    private enum QueryAction { case queryIncidents, rangerStats }
-
-    private struct QueryIntent {
-        var action: QueryAction = .queryIncidents
-        var daysBack: Int = 7
-        var incidentType: String = ""
-        var limit: Int = 5
-    }
-
-    private func parseQueryIntent(_ text: String) -> QueryIntent {
-        let lower = text.lowercased()
-        var intent = QueryIntent()
-
-        // Action
-        let rangerKeywords = ["ranger", "staff", "leaderboard", "top", "ranking", "performance", "who logged"]
-        if rangerKeywords.contains(where: { lower.contains($0) }) {
-            intent.action = .rangerStats
-        }
-
-        // Days
-        if lower.contains("today") { intent.daysBack = 1 }
-        else if lower.contains("yesterday") { intent.daysBack = 2 }
-        else if lower.contains("month") || lower.contains("30 day") { intent.daysBack = 30 }
-        else if lower.contains("2 week") || lower.contains("14 day") || lower.contains("fortnight") { intent.daysBack = 14 }
-        else if lower.contains("week") || lower.contains("7 day") { intent.daysBack = 7 }
-        else if let match = lower.range(of: #"(\d+)\s*day"#, options: .regularExpression) {
-            intent.daysBack = Int(lower[match].filter(\.isNumber)) ?? 7
-        }
-
-        // Incident type — extracted dynamically so any spot_type the user mentions works.
-        intent.incidentType = Self.extractIncidentType(from: lower)
-
-        // Limit for ranger stats
-        if let match = lower.range(of: #"top\s*(\d+)"#, options: .regularExpression) {
-            intent.limit = Int(lower[match].filter(\.isNumber)) ?? 5
-        }
-
-        return intent
-    }
-
-    /// Strips filler words from the query and returns what's left as the incident-type search term.
-    /// e.g. "Show spent cartridge from last 7 days" → "spent cartridge"
-    /// e.g. "All snare incidents this week"          → "snare"
-    /// e.g. "Total incidents this month"             → "" (no type filter)
-    private static func extractIncidentType(from lower: String) -> String {
-        // Words that carry no incident-type information
-        let stopWords: Set<String> = [
-            "show", "me", "find", "get", "list", "give", "fetch",
-            "all", "any", "recent", "total", "number", "count", "how", "many",
-            "incidents", "incident", "reports", "report", "events", "event",
-            "logged", "recorded", "from", "in", "the", "last", "past",
-            "this", "today", "yesterday",
-            "week", "weeks", "month", "months", "day", "days", "fortnight",
-            "7", "14", "30", "1", "2", "3",
-        ]
-
-        // Strip trailing date phrases like "last 7 days", "in the past month"
-        var cleaned = lower
-        let datePatterns = [
-            #"(from |in )?(the )?last \d+ days?"#,
-            #"(from |in )?(the )?past \d+ days?"#,
-            #"(from |in )?(the )?last (week|month|fortnight)"#,
-            #"this (week|month|year)"#,
-            #"today|yesterday"#,
-        ]
-        for pattern in datePatterns {
-            if let range = cleaned.range(of: pattern, options: .regularExpression) {
-                cleaned.removeSubrange(range)
-            }
-        }
-
-        // Tokenise and remove stop words
-        let tokens = cleaned
-            .components(separatedBy: CharacterSet.alphanumerics.union(.init(charactersIn: " ")).inverted)
-            .joined(separator: " ")
-            .components(separatedBy: .whitespaces)
-            .filter { !$0.isEmpty && !stopWords.contains($0) && !$0.allSatisfy(\.isNumber) }
-
-        let candidate = tokens.joined(separator: " ").trimmingCharacters(in: .whitespaces)
-
-        // Reject candidates that are just noise (single very common word)
-        let noiseWords: Set<String> = ["incident", "incidents", "report", "activity", "alert"]
-        return noiseWords.contains(candidate) ? "" : candidate
-    }
-
-
-    func query(messages: [RangerCopilotFeature.ChatMessage], missionId: UUID) async throws -> String {
-        guard let session = agentSession else {
-            throw AIError.modelsNotLoaded
-        }
-        // Build a fresh message from the last user message
-        guard let lastUserMsg = messages.last(where: { $0.role == .user }) else {
-            throw AIError.noUserMessage
-        }
-        let message = CactusUserMessage { lastUserMsg.text }
-        let completion = try await session.respond(to: message)
-        return completion.output
-    }
-
-    // MARK: - Note Dictation (AVAudioRecorder → 16 kHz mono WAV → Whisper)
-    // AVAudioEngine conflicts with CactusSTTSession's internal RealtimeMessenger —
-    // starting a second AVAudioEngine triggers its queue assertions and crashes.
-    // AVAudioRecorder is a black-box file writer with no exposed audio callbacks,
-    // so it never touches Cactus internals.
-    //
-    // Previous "Missing fmt chunk" root causes (now fixed):
-    //   • AVSampleRateKey must be Double (16000.0), not Int (16_000)
-    //   • prepareToRecord() must be called before record() to write the RIFF header
+    // MARK: - STT state — note dictation (AVAudioRecorder → SFSpeechRecognizer file transcription)
 
     private var noteRecorder: AVAudioRecorder?
     private var noteRecordingURL: URL?
 
+    // MARK: - STT state — live voice recording (AVAudioEngine + SFSpeechAudioBufferRecognitionRequest)
+
+    private var audioEngine: AVAudioEngine?
+    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    private var recognitionTask: SFSpeechRecognitionTask?
+    private var lastVoiceText: String = ""
+
+    private init() {}
+
+    // MARK: - Availability
+
+    /// Whether Apple Intelligence is available on this device.
+    var isModelAvailable: Bool {
+        SystemLanguageModel.default.isAvailable
+    }
+
+    // MARK: - Session setup
+
+    /// Prepares the RangerCopilot session with all patrol tools.
+    /// Instant — no model download needed.
+    func loadModels() async throws {
+        guard isModelAvailable else { throw AIError.modelsNotLoaded }
+        copilotSession = LanguageModelSession(
+            tools: makeCopilotTools(),
+            instructions: rangerSystemPrompt
+        )
+    }
+
+    /// Signals that the dashboard intelligence panel is ready for queries.
+    /// Instant — availability is checked at query time.
+    func loadLLMOnly() async throws {
+        guard isModelAvailable else { throw AIError.modelsNotLoaded }
+        dashboardReady = true
+    }
+
+    // MARK: - STT availability
+
+    /// Whether speech recognition is currently authorized and available.
+    /// Maps to the old "is model downloaded" concept — no downloads needed.
+    func isSTTModelDownloaded() -> Bool {
+        SFSpeechRecognizer.authorizationStatus() == .authorized
+            && (SFSpeechRecognizer(locale: .current)?.isAvailable ?? false)
+    }
+
+    /// Requests speech recognition authorization from the user.
+    /// Maps to the old "model download" step; presents a one-time permission prompt.
+    func loadSTTIfNeeded() async throws {
+        let status = await withCheckedContinuation { (cont: CheckedContinuation<SFSpeechRecognizerAuthorizationStatus, Never>) in
+            SFSpeechRecognizer.requestAuthorization { cont.resume(returning: $0) }
+        }
+        guard status == .authorized else {
+            throw AIError.speechRecognitionNotAuthorized
+        }
+    }
+
+    // MARK: - Dashboard query
+    // Each dashboard query creates a fresh ephemeral session with data tools.
+    // The LLM selects which tool(s) to call based on the question,
+    // receives DB-serialised results as context, and generates a grounded answer.
+
+    func querySingle(_ text: String) async throws -> String {
+        guard dashboardReady && isModelAvailable else { throw AIError.modelsNotLoaded }
+        let session = LanguageModelSession(
+            tools: [QueryRecentIncidentsTool(), GetRangerStatsTool()],
+            instructions: dashboardSystemPrompt
+        )
+        let response = try await session.respond(to: text)
+        return response.content
+    }
+
+    // MARK: - Copilot multi-turn chat
+
+    /// Appends the latest user message to the persistent copilot session.
+    /// The session retains full transcript context for follow-up questions.
+    func query(messages: [RangerCopilotFeature.ChatMessage], missionId: UUID) async throws -> String {
+        if copilotSession == nil { try await loadModels() }
+        guard let session = copilotSession else { throw AIError.modelsNotLoaded }
+        guard let last = messages.last(where: { $0.role == .user }) else {
+            throw AIError.noUserMessage
+        }
+        let response = try await session.respond(to: last.text)
+        return response.content
+    }
+
+    /// Starts a fresh copilot conversation (clears transcript).
+    func resetCopilotSession() {
+        guard isModelAvailable else { return }
+        copilotSession = LanguageModelSession(
+            tools: makeCopilotTools(),
+            instructions: rangerSystemPrompt
+        )
+    }
+
+    // MARK: - Voice incident processing
+
+    func processVoiceIncident(transcription: String, missionId: UUID) async throws -> String {
+        if copilotSession == nil { try await loadModels() }
+        guard let session = copilotSession else { throw AIError.modelsNotLoaded }
+        let prompt = """
+        [VOICE INCIDENT LOG] The ranger reported: "\(transcription)"
+        Parse this as a patrol incident and call log_incident with appropriate fields.
+        """
+        let response = try await session.respond(to: prompt)
+        return response.content
+    }
+
+    // MARK: - Pre-Patrol Briefing
+    // Uses a fresh ephemeral session so the briefing doesn't pollute copilot history.
+    // Flow: prompt → LLM calls query_recent_incidents + get_ranger_stats tools →
+    //       DB returns serialised data → LLM generates briefing grounded in real data.
+
+    func generateBriefing(missionId: UUID) async throws -> String {
+        guard isModelAvailable else { throw AIError.modelsNotLoaded }
+        let session = LanguageModelSession(
+            tools: [QueryRecentIncidentsTool(), GetRangerStatsTool()],
+            instructions: "Generate concise pre-patrol briefings for wildlife rangers based on real incident data from tools."
+        )
+        let response = try await session.respond(to: """
+        Generate a pre-patrol briefing. Call query_recent_incidents (daysBack: 14, \
+        incidentType: "") and get_ranger_stats (daysBack: 14, limit: 5) to get \
+        real data, then write a brief covering:
+        - Recent incident hotspots and patterns
+        - Incident type breakdown
+        - Recommended patrol focus areas
+        Keep it under 200 words. Write for a ranger about to deploy in the field.
+        """)
+        return response.content
+    }
+
+    // MARK: - Note Dictation  (AVAudioRecorder → SFSpeechRecognizer file transcription)
+    //
+    // AVAudioRecorder writes a clean WAV file with no SDK conflicts.
+    // SFSpeechRecognizer transcribes it after recording stops.
+    // On-device recognition is requested so no audio leaves the device.
+
     func startNoteRecording() throws {
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("askari_note_dictation.wav")
+            .appendingPathComponent("askari_note_\(UUID().uuidString).wav")
         noteRecordingURL = url
 
         let settings: [String: Any] = [
-            AVFormatIDKey:              kAudioFormatLinearPCM, // UInt32
-            AVSampleRateKey:            16000.0,               // Double ← was Int, caused missing fmt chunk
-            AVNumberOfChannelsKey:      1,                     // Int
-            AVLinearPCMBitDepthKey:     16,                    // Int
-            AVLinearPCMIsFloatKey:      false,                 // Bool
-            AVLinearPCMIsBigEndianKey:  false,                 // Bool
-            AVLinearPCMIsNonInterleaved: false                 // Bool
+            AVFormatIDKey:               kAudioFormatLinearPCM,
+            AVSampleRateKey:             16000.0,
+            AVNumberOfChannelsKey:       1,
+            AVLinearPCMBitDepthKey:      16,
+            AVLinearPCMIsFloatKey:       false,
+            AVLinearPCMIsBigEndianKey:   false,
+            AVLinearPCMIsNonInterleaved: false,
         ]
 
         try AVAudioSession.sharedInstance().setCategory(.record, mode: .default)
         try AVAudioSession.sharedInstance().setActive(true)
 
         let recorder = try AVAudioRecorder(url: url, settings: settings)
-        // prepareToRecord() creates and validates the RIFF/WAV file header up front.
-        // Without it, record() can produce an empty or corrupt header on some devices.
-        guard recorder.prepareToRecord() else {
-            throw NSError(domain: "AIManager", code: 3,
-                          userInfo: [NSLocalizedDescriptionKey: "AVAudioRecorder failed to prepare"])
-        }
+        guard recorder.prepareToRecord() else { throw AIError.recordingFailed }
         recorder.record()
         noteRecorder = recorder
     }
@@ -247,197 +192,136 @@ final class AIManager {
         noteRecorder = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
 
-        guard let recordingURL = noteRecordingURL else { return "" }
+        guard let url = noteRecordingURL else { return "" }
         noteRecordingURL = nil
 
-        // Build the session HERE — after the recorder has stopped and the audio session
-        // is deactivated — so Cactus audio setup never overlaps with AVAudioRecorder.
-        guard let modelURL = CactusModelsDirectory.shared.storedModelURL(for: .whisperSmall()),
-              let stt = try? CactusSTTSession(from: modelURL) else {
-            try? FileManager.default.removeItem(at: recordingURL)
+        guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US")),
+              recognizer.isAvailable else {
+            try? FileManager.default.removeItem(at: url)
             return ""
         }
 
-        do {
-            let request = CactusTranscription.Request(
-                prompt: .whisper(language: .english, includeTimestamps: false),
-                content: .audio(recordingURL)
-            )
-            let result = try await stt.transcribe(request: request)
-            try? FileManager.default.removeItem(at: recordingURL)
-            return result.content.response.trimmingCharacters(in: .whitespacesAndNewlines)
-        } catch {
-            try? FileManager.default.removeItem(at: recordingURL)
-            return ""
+        let request = SFSpeechURLRecognitionRequest(url: url)
+        request.requiresOnDeviceRecognition = true
+        request.taskHint = .dictation
+
+        return await withCheckedContinuation { continuation in
+            var finished = false
+            recognizer.recognitionTask(with: request) { result, error in
+                guard !finished else { return }
+                if let result, result.isFinal {
+                    finished = true
+                    try? FileManager.default.removeItem(at: url)
+                    continuation.resume(returning: result.bestTranscription.formattedString)
+                } else if error != nil {
+                    finished = true
+                    try? FileManager.default.removeItem(at: url)
+                    continuation.resume(returning: "")
+                }
+            }
         }
     }
 
-    // MARK: - Voice Recording
-
-    private var voiceChunks: [AVAudioPCMBuffer] = []
-    private var partialCallback: ((String) -> Void)?
+    // MARK: - Live Voice Recording  (AVAudioEngine → SFSpeechAudioBufferRecognitionRequest)
+    // Streams audio buffers directly to SFSpeechRecognizer for real-time partial results.
 
     func startVoiceRecording(onPartial: @escaping (String) -> Void) async {
-        voiceChunks.removeAll()
-        partialCallback = onPartial
+        guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US")),
+              recognizer.isAvailable else { return }
 
-        let whisperURL = try? await CactusModelsDirectory.shared.modelURL(
-            for: .whisperSmall()
-        )
-        guard let whisperURL else { return }
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.requiresOnDeviceRecognition = true
+        request.shouldReportPartialResults = true
+        recognitionRequest = request
+        lastVoiceText = ""
 
-        do {
-            transcriptionStream = try CactusTranscriptionStream(from: whisperURL)
-        } catch { return }
+        recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, _ in
+            if let result {
+                let text = result.bestTranscription.formattedString
+                self?.lastVoiceText = text
+                onPartial(text)
+            }
+        }
 
         audioEngine = AVAudioEngine()
-        let inputNode = audioEngine!.inputNode
-        let format = inputNode.outputFormat(forBus: 0)
+        guard let engine = audioEngine else { return }
+        let inputNode = engine.inputNode
+        let format    = inputNode.outputFormat(forBus: 0)
 
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
-            guard let self else { return }
-            voiceChunks.append(buffer)
-            Task { @MainActor in
-                try? await self.transcriptionStream?.process(buffer: buffer)
-            }
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+            self?.recognitionRequest?.append(buffer)
         }
 
-        // Stream partial transcriptions
-        Task {
-            guard let stream = transcriptionStream else { return }
-            for try await chunk in stream {
-                onPartial(chunk.confirmed)
-            }
+        do {
+            try AVAudioSession.sharedInstance().setCategory(
+                .record, mode: .measurement, options: .duckOthers
+            )
+            try AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
+            engine.prepare()
+            try engine.start()
+        } catch {
+            recognitionTask?.cancel()
+            recognitionTask    = nil
+            recognitionRequest = nil
+            audioEngine        = nil
         }
-
-        try? audioEngine?.start()
     }
 
     func stopVoiceRecording() async -> String {
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
         audioEngine = nil
+        recognitionRequest?.endAudio()
+        recognitionRequest = nil
+        recognitionTask?.finish()
+        recognitionTask = nil
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
 
-        do {
-            _ = try await transcriptionStream?.finish()
-        } catch {}
-
-        // Run VAD + full transcription on collected buffers
-        guard let stt = sttSession, !voiceChunks.isEmpty else { return "" }
-
-        let combinedSamples = voiceChunks.flatMap { buffer -> [Float] in
-            guard let data = buffer.floatChannelData else { return [] }
-            return Array(UnsafeBufferPointer(start: data[0], count: Int(buffer.frameLength)))
-        }
-
-        // Merge to a single buffer for STT
-        guard let firstFormat = voiceChunks.first?.format,
-              let merged = AVAudioPCMBuffer(pcmFormat: firstFormat, frameCapacity: AVAudioFrameCount(combinedSamples.count)) else {
-            return ""
-        }
-        merged.frameLength = AVAudioFrameCount(combinedSamples.count)
-        combinedSamples.withUnsafeBufferPointer { ptr in
-            merged.floatChannelData?[0].update(from: ptr.baseAddress!, count: combinedSamples.count)
-        }
-
-        do {
-            let request = CactusTranscription.Request(
-                prompt: .whisper(language: .english, includeTimestamps: false),
-                content: try .pcm(merged)
-            )
-            let transcription = try await stt.transcribe(request: request)
-            return transcription.content.response
-        } catch {
-            return ""
-        }
-    }
-
-    // MARK: - Voice Incident Processing
-
-    func processVoiceIncident(transcription: String, missionId: UUID) async throws -> String {
-        guard let session = agentSession else { throw AIError.modelsNotLoaded }
-
-        let message = CactusUserMessage {
-            """
-            [VOICE INCIDENT LOG] The ranger said: "\(transcription)"
-
-            Parse this as an incident and call log_incident with the appropriate fields.
-            """
-        }
-        let completion = try await session.respond(to: message)
-        return completion.output
-    }
-
-    // MARK: - Pre-Patrol Briefing
-
-    func generateBriefing(missionId: UUID) async throws -> String {
-        guard let session = agentSession else { throw AIError.modelsNotLoaded }
-
-        let message = CactusUserMessage {
-            """
-            Generate a pre-patrol briefing for the park ranger.
-
-            Call query_recent_incidents (daysBack: 14, incidentType: "") and get_ranger_stats (daysBack: 14, limit: 5)
-            to gather data, then write a concise briefing covering:
-            - Recent incidents in the park (last 14 days)
-            - Incident hotspots based on frequency
-            - Recommended areas of focus based on incident density
-
-            Keep it practical and under 200 words. Write for a ranger about to go on patrol.
-            """
-        }
-        let completion = try await session.respond(to: message)
-        return completion.output
+        let text = lastVoiceText
+        lastVoiceText = ""
+        return text
     }
 
     // MARK: - Cleanup
 
     func destroy() {
+        audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
-        audioEngine = nil
-        agentSession = nil
-        sttSession = nil
-        vadSession = nil
+        audioEngine        = nil
+        recognitionTask?.cancel()
+        recognitionTask    = nil
+        recognitionRequest = nil
+        noteRecorder?.stop()
+        noteRecorder   = nil
+        copilotSession = nil
+        dashboardReady = false
     }
 }
 
-// MARK: - Tools factory
+// MARK: - Tools factories
 
 private extension AIManager {
-    func makeTools() -> [any CactusFunction] {
-        [
-            QueryRecentIncidentsTool(),
-            LogIncidentTool(),
-            GetRangerStatsTool(),
-        ]
+    func makeCopilotTools() -> [any Tool] {
+        [QueryRecentIncidentsTool(), LogIncidentTool(), GetRangerStatsTool()]
     }
 }
 
 // MARK: - System Prompts
 
 private let dashboardSystemPrompt = """
-You are an AI assistant for Askari AI, a wildlife anti-poaching management system.
-
-When the user asks about incidents, rangers, or activity data:
-1. Call the appropriate tool immediately with the correct parameters.
-2. After receiving the tool results, give a brief 2-3 sentence summary.
-
-Rules:
-- Always call a tool before answering — never guess or invent data.
-- Keep answers short and factual.
-- If no data is returned, say so clearly.
+You are an AI assistant for Askari AI, a wildlife anti-poaching platform.
+When asked about incidents or rangers, call the appropriate tool immediately.
+After receiving tool results, give a brief 2–3 sentence summary.
+Never guess or invent data — always call a tool first.
 """
 
 private let rangerSystemPrompt = """
-You are an AI intelligence copilot for wildlife park rangers. You have access to tools \
-that query real-time patrol data from the local database.
-
-Rules:
-- Only answer based on data returned by your tools — never guess or hallucinate facts.
+You are an AI intelligence copilot for wildlife park rangers. Use your tools to \
+query real-time patrol data from the local database.
+- Only answer based on tool results — never hallucinate facts.
 - Keep answers brief and actionable for a ranger in the field.
-- When logging incidents, always confirm the details before writing to the database.
-- Distances should be in kilometers. Coordinates should not be shown to the user.
-- If data is missing, say so clearly.
+- When logging incidents, confirm details before writing to the database.
+- Express distances in kilometers. Never show raw coordinates to the user.
 """
 
 // MARK: - Errors
@@ -445,11 +329,21 @@ Rules:
 enum AIError: Error, LocalizedError {
     case modelsNotLoaded
     case noUserMessage
+    case speechRecognitionNotAuthorized
+    case recordingFailed
 
     var errorDescription: String? {
         switch self {
-        case .modelsNotLoaded: return "AI models are not loaded yet. Please wait for download to complete."
-        case .noUserMessage: return "No user message found."
+        case .modelsNotLoaded:
+            return "Apple Intelligence is not available on this device. Ensure Apple Intelligence is enabled in Settings."
+        case .noUserMessage:
+            return "No user message found."
+        case .speechRecognitionNotAuthorized:
+            return "Speech recognition permission denied. Enable it in Settings → Privacy & Security → Speech Recognition."
+        case .recordingFailed:
+            return "Microphone recording failed to start."
         }
     }
 }
+
+

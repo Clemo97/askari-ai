@@ -1,5 +1,4 @@
 import ComposableArchitecture
-import Cactus
 import SwiftUI
 
 // MARK: - RangerCopilotFeature
@@ -112,14 +111,7 @@ struct RangerCopilotFeature {
                 state.modelLoadState = .downloading(progress: 0)
                 return .run { send in
                     do {
-                        // Download LLM model
-                        let lmURL = try await CactusModelsDirectory.shared.modelURL(
-                            for: .lfm2_5_1_2bThinking()
-                        )
-                        // Download Whisper model for voice
-                        let _ = try await CactusModelsDirectory.shared.modelURL(
-                            for: .whisperSmall(pro: .apple)
-                        )
+                        try await AIManager.shared.loadModels()
                         await send(.modelsReady)
                     } catch {
                         await send(.modelFailed(error.localizedDescription))

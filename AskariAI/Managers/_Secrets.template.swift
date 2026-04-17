@@ -10,6 +10,4 @@
 //    static let powerSyncEndpoint = "YOUR_POWERSYNC_ENDPOINT"
 //    // Optional storage bucket name. Set to nil if you don't want to use storage.
 //    static let supabaseStorageBucket: String? = nil
-//    // Set to nil for fully offline-only AI; set to your Cactus Cloud key for hybrid fallback
-//    static let cactusCloudKey: String? = nil
 //}
