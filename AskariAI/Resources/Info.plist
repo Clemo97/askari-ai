@@ -28,6 +28,8 @@
 	<string>Used to track patrol GPS route during active missions.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Used for voice incident logging in the field — all processing happens on-device.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Used to transcribe voice notes during patrol incident reports — all recognition happens on-device.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Saves incident photos and videos to your device library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

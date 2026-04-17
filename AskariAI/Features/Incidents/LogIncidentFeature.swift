@@ -1,8 +1,11 @@
 import ComposableArchitecture
 import CoreLocation
+import OSLog
 import Photos
 import SwiftUI
 import UIKit
+
+private let featureLog = Logger(subsystem: "ai.askari", category: "LogIncidentFeature")
 
 // MARK: - LogIncidentFeature
 
@@ -69,6 +72,7 @@ struct LogIncidentFeature {
         // Voice notes
         case noteMicTapped
         case noteSTTReady
+        case noteSTTFailed
         case sttModelChecked(Bool)
         case noteTranscriptionUpdated(String)
         case noteVoiceTranscribed(String)
@@ -250,34 +254,54 @@ struct LogIncidentFeature {
             // MARK: Voice Notes
 
             case .noteSTTReady:
+                featureLog.info("[reducer] noteSTTReady — transitioning to .recording")
                 state.sttModelAvailable = true  // model is now on disk
                 state.noteVoiceState = .recording
                 state.noteTranscriptionPreview = ""
                 return .run { send in
                     do {
+                        featureLog.info("[reducer] calling startNoteRecording")
                         try await AIManager.shared.startNoteRecording()
+                        featureLog.info("[reducer] startNoteRecording succeeded")
                     } catch {
-                        // Recording failed to start — reset silently
+                        featureLog.error("[reducer] startNoteRecording threw: \(error, privacy: .public)")
                         await send(.noteVoiceTranscribed(""))
                     }
                 }
 
+            case .noteSTTFailed:
+                featureLog.error("[reducer] noteSTTFailed — resetting to .idle")
+                state.noteVoiceState = .idle
+                state.sttModelAvailable = false
+                state.errorMessage = "Speech recognition permission denied. Enable it in Settings → Privacy & Security → Speech Recognition."
+                return .none
+
             case .noteMicTapped:
                 switch state.noteVoiceState {
                 case .idle:
+                    featureLog.info("[reducer] noteMicTapped(.idle) — starting STT load")
                     state.noteVoiceState = .loadingSTT
                     return .run { send in
-                        try? await AIManager.shared.loadSTTIfNeeded()
-                        await send(.noteSTTReady)
+                        do {
+                            try await AIManager.shared.loadSTTIfNeeded()
+                            featureLog.info("[reducer] loadSTTIfNeeded succeeded")
+                            await send(.noteSTTReady)
+                        } catch {
+                            featureLog.error("[reducer] loadSTTIfNeeded threw: \(error, privacy: .public)")
+                            await send(.noteSTTFailed)
+                        }
                     }
                 case .recording:
+                    featureLog.info("[reducer] noteMicTapped(.recording) — stopping recording")
                     state.noteVoiceState = .transcribing
                     state.noteTranscriptionPreview = ""
                     return .run { send in
                         let text = await AIManager.shared.stopNoteRecording()
+                        featureLog.info("[reducer] stopNoteRecording returned \(text.count, privacy: .public) chars")
                         await send(.noteVoiceTranscribed(text))
                     }
                 default:
+                    featureLog.warning("[reducer] noteMicTapped in unexpected state")
                     return .none
                 }
 
