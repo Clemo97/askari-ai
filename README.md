@@ -2,7 +2,7 @@
 
 > PowerSync AI Hackathon 2026 · Local-First & Offline-Capable AI
 
-An on-device AI assistant for wildlife park rangers. All AI inference runs locally using **swift-cactus** — no connectivity required. Data syncs to Supabase via **PowerSync** when back in range.
+An on-device AI assistant for wildlife park rangers. All AI inference runs locally using **Apple Foundation Models** and **SpeechAnalyzer** — no connectivity required for intelligence features. Data syncs to Supabase via **PowerSync** when back in range.
 
 ---
 
@@ -10,9 +10,9 @@ An on-device AI assistant for wildlife park rangers. All AI inference runs local
 
 | Feature | Stack |
 |---------|-------|
-| Natural language patrol queries | Pure Swift NL parser + CactusFunction SQL tools |
-| Voice incident note dictation (STT) | AVAudioRecorder + CactusSTTSession (Whisper Small) |
-| Pre-patrol AI briefing | CactusAgentSession + local SQLite |
+| Natural language patrol queries | Apple Foundation Models + tool calling (local SQLite) |
+| Voice incident note dictation (STT) | AVAudioRecorder + SpeechAnalyzer / SpeechTranscriber |
+| Pre-patrol AI briefing | Apple Foundation Models + ephemeral session |
 | Offline-first sync | PowerSync Sync Streams → Supabase |
 | Reactive UI | SwiftUI + The Composable Architecture |
 
@@ -39,9 +39,9 @@ AskariAI/
 ├── Views/                  # SwiftUI views
 │   └── Copilot/            # CopilotChatView, AIBriefingView
 └── AI/
-    ├── AIManager.swift     # CactusAgentSession / STT / VAD lifecycle
+    ├── AIManager.swift     # Foundation Models sessions + SpeechAnalyzer lifecycle
     └── Tools/
-        └── CactusTools.swift  # CactusFunction implementations
+        └── CactusTools.swift  # Tool protocol implementations (DB query + incident logging)
 
 supabase/
 └── migrations/
@@ -58,8 +58,9 @@ powersync/
 
 ### Prerequisites
 
-- **Xcode 16+** (Swift 6 toolchain)
-- **iOS 17+ device or simulator** (on-device AI requires a real device for Whisper/LLM inference)
+- **Xcode 26+** (Swift 6 toolchain)
+- **iOS 26+ device** — Apple Foundation Models and SpeechAnalyzer require a real device with Apple Intelligence enabled (simulator is not supported)
+- **Apple Intelligence** enabled on the device (Settings → Apple Intelligence & Siri)
 - A **Supabase** project
 - A **PowerSync** Cloud instance linked to that Supabase project
 
@@ -183,7 +184,8 @@ The config is at [powersync/sync-config.yaml](powersync/sync-config.yaml).
 2. **Product → Run** (⌘R)
 3. Sign up with an email — `handle_new_user` creates a `staff` row and assigns the default park automatically
 4. To promote yourself to admin, run `UPDATE public.staff SET rank = 'admin' WHERE email = 'you@example.com';` in the SQL Editor
-5. AI models download on first use (~1.2 GB for LLM, ~150 MB for Whisper)
+5. Apple Foundation Models are built into the OS — no model download required for LLM features
+6. SpeechAnalyzer locale assets (~50–100 MB) download automatically on first dictation tap
 
 ---
 
@@ -192,11 +194,12 @@ The config is at [powersync/sync-config.yaml](powersync/sync-config.yaml).
 | Package | URL | Version |
 |---------|-----|---------|
 | PowerSync Swift SDK | `https://github.com/powersync-ja/powersync-swift` | `1.13.0` |
-| Supabase Swift | `https://github.com/supabase/supabase-swift` | `>= 2.0.0` |
-| TCA | `https://github.com/pointfreeco/swift-composable-architecture` | `>= 1.0.0` |
-| swift-cactus | `https://github.com/nicholasnlawson/swift-cactus` | `2.1.1` |
+| Supabase Swift | `https://github.com/supabase/supabase-swift` | `>= 2.41.1` |
+| TCA | `https://github.com/pointfreeco/swift-composable-architecture` | `>= 1.25.1` |
 
 All packages are declared in `Package.swift` and resolve automatically in Xcode.
+
+> **Note:** `FoundationModels` and `Speech` (SpeechAnalyzer) are Apple system frameworks — no SPM dependency required. They are available on iOS 26+.
 
 ---
 
@@ -260,25 +263,41 @@ try await sub.waitForFirstSync()
 
 ---
 
-## AI Models (swift-cactus 2.1.1)
+## Apple Intelligence — On-Device AI
 
-| Model | Use | Notes |
-|-------|-----|-------|
-| `lfm2_5_1_2bThinking` | LLM for briefing + Copilot chat | ~1.2 GB, downloaded once |
-| `whisperSmall()` | STT for voice note dictation | ~150 MB — use standard variant, not `pro:` |
-| `sileroVad` | Voice activity detection (Copilot) | ~5 MB |
+All AI features use Apple system frameworks — no third-party model hosting, no network calls for inference.
 
-Models are downloaded once to Application Support via `CactusModelsDirectory.shared.modelURL(for:)`.
+### Foundation Models (LLM)
 
-> **Note:** `whisperSmall(pro: .apple)` requires CoreML entitlements and crashes on load as GGUF. Always use `whisperSmall()` (standard).
+| Feature | Session type | Notes |
+|---------|-------------|-------|
+| Ranger Copilot chat | `LanguageModelSession` (persistent) | Multi-turn; retains transcript |
+| Pre-patrol briefing | `LanguageModelSession` (ephemeral) | Fresh session per briefing |
+| Dashboard queries | `LanguageModelSession` (ephemeral) | Fresh session per query |
+
+- Availability checked at runtime via `SystemLanguageModel.default.isAvailable`
+- Tool calling via the `Tool` protocol: `QueryRecentIncidentsTool`, `GetRangerStatsTool`, `LogIncidentTool` — each executes a PowerSync SQLite query and returns structured JSON to the model
+- No model download required — Apple Intelligence is part of the OS
+
+### SpeechAnalyzer (STT)
+
+Voice note dictation uses `SpeechAnalyzer` + `SpeechTranscriber` (iOS 26 Speech framework), following the WWDC25 session 277 reference architecture.
+
+| Component | Role |
+|-----------|------|
+| `AVAudioRecorder` | Captures 16 kHz mono PCM WAV to a temp file |
+| `SpeechAnalyzer` | Orchestrates transcription pipeline |
+| `SpeechTranscriber` | On-device locale model; options-based init with `.volatileResults` |
+| `AssetInventory` | Downloads locale model assets on first use (~50–100 MB); no-op if already current |
+| `STTBufferConverter` | Resamples `AVAudioPCMBuffer` for live streaming; `primeMethod = .none` avoids timestamp drift |
 
 ### Voice Note Dictation Flow
 
-The `CactusSTTSession` is created **after** `AVAudioRecorder` has fully stopped and the audio session is deactivated. Creating a session before recording starts activates Cactus audio infrastructure that conflicts with `AVAudioRecorder`, producing a corrupt WAV file. The sequence is:
-
-1. User taps **Dictate** → `loadSTTIfNeeded()` downloads the model file only (no session created)
-2. `AVAudioRecorder` records to a 16 kHz mono PCM `.wav` temp file
+1. User taps **Dictate** → `loadSTTIfNeeded()` requests mic permission then ensures locale assets are installed via `AssetInventory`
+2. `AVAudioRecorder` records to a 16 kHz mono PCM `.wav` temp file (audio session: `.playAndRecord` / `.spokenAudio`)
 3. User taps **Stop** → recorder stops, audio session deactivated
-4. `CactusSTTSession` is created from the on-disk model, `transcribe(request:)` called with the file URL
-5. Transcription appended to the incident notes field; temp file deleted
+4. `SpeechAnalyzer.start(inputAudioFile:finishAfterFile:true)` processes the file autonomously; `finalizeAndFinishThroughEndOfInput()` flushes results
+5. Only `isFinal` results are collected; transcription appended to the incident notes field; temp file deleted
+
+> **Device requirement:** Apple Foundation Models and SpeechAnalyzer require a physical device running iOS 26 with Apple Intelligence enabled. Neither works in Simulator.
 
