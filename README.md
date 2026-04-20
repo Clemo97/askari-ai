@@ -6,6 +6,30 @@ An on-device AI assistant for wildlife park rangers. All AI inference runs local
 
 ---
 
+## Demo
+
+### Video walkthrough
+
+https://github.com/Clemo97/askari-ai/raw/main/Videos/RPReplay_Final1776686584.MP4
+
+---
+
+### Screenshots
+
+**Patrol map** — live incident pins with colour-coded severity, park boundary overlay, and tap-to-view incident detail
+
+![Patrol map with incident pins](Videos/IMG_0255.PNG)
+
+**Incident report** — full detail view with category, GPS coordinates, field notes, and photo evidence
+
+![Incident report detail](Videos/IMG_0254.PNG)
+
+**AI Intelligence dashboard** — natural-language query powered by Apple Foundation Models with tool-called results from the local PowerSync SQLite DB
+
+![AI Intelligence dashboard](Videos/IMG_0253.PNG)
+
+---
+
 ## Features
 
 | Feature | Stack |
