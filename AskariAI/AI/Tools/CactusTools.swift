@@ -16,14 +16,14 @@ private func row(_ cursor: any SqlCursor) -> [String: String?] {
 
 struct QueryRecentIncidentsTool: Tool {
     let name = "query_recent_incidents"
-    let description = "Get recent poaching incidents from the patrol database. Returns incident type, description, date, severity, and ranger name."
+    let description = "Query patrol incidents from the local database. Returns incident type, description, date, severity, and ranger name."
 
     @Generable
     struct Arguments {
-        @Guide(description: "Days back to search, e.g. 7, 14, 30")
+        @Guide(description: "Number of days to look back. 1 = today, 7 = last week, 30 = last month.")
         var daysBack: Int
 
-        @Guide(description: "Incident type filter e.g. snare, carcass, poacher_camp. Use empty string for all types.")
+        @Guide(description: "Optional spot type keyword to filter by, e.g. snare, carcass, footprint, cartridge, camp. Pass an empty string to return all types.")
         var incidentType: String
     }
 
